@@ -81,10 +81,12 @@ public class MetricsCollector {
         }
         requestLatency.record(latency);
         
-        // Datacenter-specific metrics
-        DatacenterMetrics metrics = datacenterMetrics.get(datacenterId);
-        if (metrics != null) {
-            metrics.recordRequest(latency, success);
+        // Datacenter-specific metrics (only if datacenterId is not null)
+        if (datacenterId != null) {
+            DatacenterMetrics metrics = datacenterMetrics.get(datacenterId);
+            if (metrics != null) {
+                metrics.recordRequest(latency, success);
+            }
         }
     }
     
@@ -95,9 +97,11 @@ public class MetricsCollector {
             activeConnections.decrementAndGet();
         }
         
-        DatacenterMetrics metrics = datacenterMetrics.get(datacenterId);
-        if (metrics != null) {
-            metrics.recordConnectionEvent(connected);
+        if (datacenterId != null) {
+            DatacenterMetrics metrics = datacenterMetrics.get(datacenterId);
+            if (metrics != null) {
+                metrics.recordConnectionEvent(connected);
+            }
         }
     }
     
@@ -110,9 +114,11 @@ public class MetricsCollector {
     }
     
     public void recordCircuitBreakerEvent(String datacenterId, String event) {
-        DatacenterMetrics metrics = datacenterMetrics.get(datacenterId);
-        if (metrics != null) {
-            metrics.recordCircuitBreakerEvent(event);
+        if (datacenterId != null) {
+            DatacenterMetrics metrics = datacenterMetrics.get(datacenterId);
+            if (metrics != null) {
+                metrics.recordCircuitBreakerEvent(event);
+            }
         }
     }
     

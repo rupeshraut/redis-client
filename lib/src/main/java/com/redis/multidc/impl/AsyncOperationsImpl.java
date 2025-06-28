@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -775,12 +776,31 @@ public class AsyncOperationsImpl implements AsyncOperations {
 
     @Override
     public CompletableFuture<Boolean> isTombstoned(String key) {
-        return CompletableFuture.completedFuture(false);
+        return get(key).thenApply(data -> data != null);
     }
 
     @Override
     public CompletableFuture<TombstoneKey> getTombstone(String key) {
-        return CompletableFuture.completedFuture(null);
+        return get(key).thenApply(data -> {
+            if (data == null) {
+                return null;
+            }
+            try {
+                // Parse the JSON data to create TombstoneKey
+                // For now, create a simple SOFT_DELETE tombstone with current time
+                return new TombstoneKey(
+                    key,
+                    TombstoneKey.Type.SOFT_DELETE,
+                    Instant.now(),
+                    null, // no expiration
+                    "us-east-1", // default datacenter
+                    "Retrieved tombstone",
+                    Map.of()
+                );
+            } catch (Exception e) {
+                return null;
+            }
+        });
     }
 
     @Override
@@ -808,12 +828,26 @@ public class AsyncOperationsImpl implements AsyncOperations {
 
     @Override
     public CompletableFuture<Boolean> releaseLock(String lockKey, String lockValue, DatacenterPreference preference) {
-        return get(lockKey, preference)
-            .thenCompose(currentValue -> {
-                if (lockValue.equals(currentValue)) {
-                    return delete(lockKey, preference);
-                }
-                return CompletableFuture.completedFuture(false);
+        Optional<String> datacenterId = router.selectDatacenterForWrite(preference);
+        if (datacenterId.isEmpty()) {
+            return CompletableFuture.completedFuture(false);
+        }
+        
+        StatefulRedisConnection<String, String> connection = connections.get(datacenterId.get());
+        if (connection == null) {
+            return CompletableFuture.completedFuture(false);
+        }
+        
+        RedisAsyncCommands<String, String> asyncCommands = connection.async();
+        
+        // Lua script to atomically check value and delete if it matches
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+        
+        return asyncCommands.eval(script, io.lettuce.core.ScriptOutputType.INTEGER, new String[]{lockKey}, lockValue)
+            .toCompletableFuture()
+            .thenApply(result -> {
+                long deleteCount = (Long) result;
+                return deleteCount > 0;
             });
     }
 
