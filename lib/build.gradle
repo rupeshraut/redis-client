@@ -1,0 +1,76 @@
+/*
+ * Redis Multi-Datacenter Client Library
+ * 
+ * A comprehensive Java library for Redis operations across multiple datacenters
+ * with support for sync, async, and reactive programming models.
+ */
+
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'signing'
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    lettuceVersion = '6.3.2.RELEASE'
+    springBootVersion = '3.2.0'
+    micrometerVersion = '1.12.0'
+    reactorVersion = '3.6.0'
+    jacksonVersion = '2.15.3'
+    slf4jVersion = '2.0.9'
+    logbackVersion = '1.4.11'
+    testcontainersVersion = '1.19.3'
+    awaitilityVersion = '4.2.0'
+}
+
+dependencies {
+    // Core Redis client
+    api "io.lettuce:lettuce-core:${lettuceVersion}"
+    
+    // Reactive streams
+    api "io.projectreactor:reactor-core:${reactorVersion}"
+    
+    // Metrics and observability
+    api "io.micrometer:micrometer-core:${micrometerVersion}"
+    api "io.micrometer:micrometer-registry-prometheus:${micrometerVersion}"
+    
+    // JSON serialization
+    api "com.fasterxml.jackson.core:jackson-core:${jacksonVersion}"
+    api "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+    api "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${jacksonVersion}"
+    
+    // Logging
+    api "org.slf4j:slf4j-api:${slf4jVersion}"
+    
+    // Optional Spring Boot integration
+    compileOnly "org.springframework.boot:spring-boot-starter:${springBootVersion}"
+    compileOnly "org.springframework.boot:spring-boot-autoconfigure:${springBootVersion}"
+    
+    // Test dependencies
+    testImplementation libs.junit.jupiter
+    testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
+    testImplementation "org.testcontainers:junit-jupiter:${testcontainersVersion}"
+    testImplementation "org.awaitility:awaitility:${awaitilityVersion}"
+    testImplementation "io.projectreactor:reactor-test:${reactorVersion}"
+    testImplementation "ch.qos.logback:logback-classic:${logbackVersion}"
+    testImplementation "org.mockito:mockito-core:5.7.0"
+    testImplementation "org.mockito:mockito-junit-jupiter:5.7.0"
+    
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Apply a specific Java toolchain to ease working on different environments.
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+tasks.named('test') {
+    // Use JUnit Platform for unit tests.
+    useJUnitPlatform()
+}
