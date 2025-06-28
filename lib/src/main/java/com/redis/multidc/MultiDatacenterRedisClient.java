@@ -5,6 +5,8 @@ import com.redis.multidc.model.DatacenterInfo;
 import com.redis.multidc.operations.AsyncOperations;
 import com.redis.multidc.operations.ReactiveOperations;
 import com.redis.multidc.operations.SyncOperations;
+import com.redis.multidc.pool.ConnectionPoolMetrics;
+import com.redis.multidc.pool.ConnectionPoolManager.AggregatedPoolMetrics;
 import reactor.core.Disposable;
 
 import java.util.List;
@@ -72,6 +74,31 @@ public interface MultiDatacenterRedisClient extends AutoCloseable {
      * @return Disposable to unsubscribe from events
      */
     Disposable subscribeToHealthChanges(DatacenterHealthListener listener);
+    
+    /**
+     * Get connection pool metrics for a specific datacenter.
+     * @param datacenterId the datacenter identifier
+     * @return connection pool metrics, or null if datacenter not found
+     */
+    ConnectionPoolMetrics getConnectionPoolMetrics(String datacenterId);
+    
+    /**
+     * Get aggregated connection pool metrics across all datacenters.
+     * @return aggregated pool metrics
+     */
+    AggregatedPoolMetrics getAggregatedPoolMetrics();
+    
+    /**
+     * Check if all connection pools are healthy.
+     * @return true if all pools are healthy and can provide connections
+     */
+    boolean areAllPoolsHealthy();
+    
+    /**
+     * Force maintenance on all connection pools.
+     * This triggers immediate cleanup of idle/expired connections.
+     */
+    void maintainAllConnectionPools();
     
     /**
      * Close the client and release all resources.

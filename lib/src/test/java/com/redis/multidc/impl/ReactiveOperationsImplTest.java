@@ -6,6 +6,7 @@ import com.redis.multidc.model.DatacenterPreference;
 import com.redis.multidc.model.TombstoneKey;
 import com.redis.multidc.observability.MetricsCollector;
 import com.redis.multidc.routing.DatacenterRouter;
+import com.redis.multidc.resilience.ResilienceManager;
 import io.lettuce.core.api.reactive.RedisReactiveCommands;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,9 @@ class ReactiveOperationsImplTest {
     @Mock
     private MetricsCollector metricsCollector;
 
+    @Mock
+    private ResilienceManager resilienceManager;
+
     private ReactiveOperationsImpl operations;
     private DatacenterConfiguration config;
 
@@ -61,7 +65,10 @@ class ReactiveOperationsImplTest {
         when(router.selectDatacenterForRead(any())).thenReturn(Optional.of("dc1"));
         when(router.selectDatacenterForWrite(any())).thenReturn(Optional.of("dc1"));
         
-        operations = new ReactiveOperationsImpl(connections, router, metricsCollector, config);
+        // Mock ResilienceManager to pass through operations unchanged
+        when(resilienceManager.decorateMono(anyString(), any())).thenAnswer(invocation -> invocation.getArgument(1));
+        
+        operations = new ReactiveOperationsImpl(connections, router, metricsCollector, resilienceManager, config);
     }
 
     @Test
@@ -153,9 +160,9 @@ class ReactiveOperationsImplTest {
     void testErrorHandling() {
         when(reactiveCommands.get(anyString())).thenReturn(Mono.error(new RuntimeException("Redis error")));
         
-        // The get method handles errors by returning empty instead of propagating them
+        // The get method propagates errors through the resilience layer
         StepVerifier.create(operations.get("key"))
-                .expectComplete()
+                .expectError(RuntimeException.class)
                 .verify();
     }
 

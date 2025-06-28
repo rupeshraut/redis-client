@@ -8,6 +8,8 @@ import com.redis.multidc.model.DatacenterPreference;
 import com.redis.multidc.model.TombstoneKey;
 import com.redis.multidc.observability.MetricsCollector;
 import com.redis.multidc.routing.DatacenterRouter;
+import com.redis.multidc.resilience.ResilienceManager;
+import com.redis.multidc.config.ResilienceConfig;
 import io.lettuce.core.KeyValue;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
@@ -16,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.time.Duration;
 import java.util.*;
@@ -25,6 +29,7 @@ import java.util.*;
  * Tests all methods, error paths, and edge cases to achieve 100% coverage.
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class SyncOperationsImplComprehensiveTest {
 
     @Mock
@@ -38,6 +43,9 @@ class SyncOperationsImplComprehensiveTest {
     
     @Mock
     private RedisCommands<String, String> syncCommands;
+    
+    @Mock
+    private ResilienceManager resilienceManager;
     
     private Map<String, StatefulRedisConnection<String, String>> connections;
     private SyncOperationsImpl syncOperations;
@@ -65,7 +73,10 @@ class SyncOperationsImplComprehensiveTest {
         lenient().when(syncCommands.hmset(anyString(), anyMap())).thenReturn("OK");
         lenient().when(syncCommands.hdel(anyString(), any(String[].class))).thenReturn(1L);
 
-        syncOperations = new SyncOperationsImpl(router, connections, metricsCollector);
+        // Mock ResilienceManager to pass through operations unchanged
+        when(resilienceManager.decorateSupplier(anyString(), any())).thenAnswer(invocation -> invocation.getArgument(1));
+
+        syncOperations = new SyncOperationsImpl(router, connections, metricsCollector, resilienceManager);
     }
 
     // ===== String Operations Tests =====

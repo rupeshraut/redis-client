@@ -27,6 +27,7 @@ ext {
     logbackVersion = '1.4.11'
     testcontainersVersion = '1.19.3'
     awaitilityVersion = '4.2.0'
+    resilience4jVersion = '2.1.0'
 }
 
 dependencies {
@@ -35,6 +36,16 @@ dependencies {
     
     // Reactive streams
     api "io.projectreactor:reactor-core:${reactorVersion}"
+    
+    // Resilience4j for circuit breaker, retry, rate limiter, bulkhead, time limiter
+    api "io.github.resilience4j:resilience4j-circuitbreaker:${resilience4jVersion}"
+    api "io.github.resilience4j:resilience4j-retry:${resilience4jVersion}"
+    api "io.github.resilience4j:resilience4j-ratelimiter:${resilience4jVersion}"
+    api "io.github.resilience4j:resilience4j-bulkhead:${resilience4jVersion}"
+    api "io.github.resilience4j:resilience4j-timelimiter:${resilience4jVersion}"
+    api "io.github.resilience4j:resilience4j-reactor:${resilience4jVersion}"
+    api "io.github.resilience4j:resilience4j-micrometer:${resilience4jVersion}"
+    api "io.github.resilience4j:resilience4j-all:${resilience4jVersion}"
     
     // Metrics and observability
     api "io.micrometer:micrometer-core:${micrometerVersion}"

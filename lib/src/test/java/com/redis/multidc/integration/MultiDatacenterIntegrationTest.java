@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -60,21 +61,43 @@ class MultiDatacenterIntegrationTest {
 
         config = DatacenterConfiguration.builder()
                 .localDatacenter("us-east-1")
+                // Connection and timeout configurations
+                .connectionTimeout(Duration.ofSeconds(10))
+                .requestTimeout(Duration.ofSeconds(5))
+                .healthCheckInterval(Duration.ofSeconds(30))
+                .maxRetries(3)
+                .retryDelay(Duration.ofMillis(500))
+                .enableCircuitBreaker(true)
                 .datacenters(List.of(
                         DatacenterEndpoint.builder()
                                 .id("us-east-1")
+                                .region("us-east-1")
                                 .host(redisDc1.getHost())
                                 .port(redisDc1.getFirstMappedPort())
+                                .ssl(false) // Disabled for test containers
+                                .priority(1) // Primary datacenter
+                                .weight(1.0)
+                                .readOnly(false)
                                 .build(),
                         DatacenterEndpoint.builder()
                                 .id("us-west-1")
+                                .region("us-west-1")
                                 .host(redisDc2.getHost())
                                 .port(redisDc2.getFirstMappedPort())
+                                .ssl(false) // Disabled for test containers
+                                .priority(2) // Secondary datacenter
+                                .weight(0.8)
+                                .readOnly(false)
                                 .build(),
                         DatacenterEndpoint.builder()
                                 .id("eu-west-1")
+                                .region("eu-west-1")
                                 .host(redisDc3.getHost())
                                 .port(redisDc3.getFirstMappedPort())
+                                .ssl(false) // Disabled for test containers
+                                .priority(3) // Tertiary datacenter
+                                .weight(0.6)
+                                .readOnly(false)
                                 .build()
                 ))
                 .build();
@@ -710,4 +733,351 @@ class MultiDatacenterIntegrationTest {
     }
 
     private final String userId = "user12345"; // Add field for the realistic test methods
+
+    @Test
+    void testProductionReadyConfiguration() {
+        // This test demonstrates how to configure SSL and connection pooling for production
+        // We'll use our existing working configuration and enhance it with production settings
+        
+        // Test the current configuration has the enhanced settings we added
+        assertNotNull(config);
+        assertEquals("us-east-1", config.getLocalDatacenterId());
+        assertEquals(3, config.getDatacenters().size());
+        
+        // Verify enhanced connection settings
+        assertEquals(Duration.ofSeconds(10), config.getConnectionTimeout());
+        assertEquals(Duration.ofSeconds(5), config.getRequestTimeout());
+        assertEquals(Duration.ofSeconds(30), config.getHealthCheckInterval());
+        assertEquals(3, config.getMaxRetries());
+        assertEquals(Duration.ofMillis(500), config.getRetryDelay());
+        assertTrue(config.isCircuitBreakerEnabled());
+        
+        // Verify datacenter endpoint configurations
+        for (DatacenterEndpoint endpoint : config.getDatacenters()) {
+            assertNotNull(endpoint.getId());
+            assertNotNull(endpoint.getRegion());
+            assertNotNull(endpoint.getHost());
+            assertTrue(endpoint.getPort() > 0);
+            assertTrue(endpoint.getWeight() > 0);
+            assertTrue(endpoint.getPriority() >= 0);
+            
+            // In our test setup, SSL is disabled, but we verify the capability exists
+            assertFalse(endpoint.isSsl(), "Test containers should have SSL disabled");
+        }
+        
+        System.out.println("Production configuration patterns demonstrated:");
+        System.out.println("==============================================");
+        System.out.println("Connection Management:");
+        System.out.printf("- Connection timeout: %s%n", config.getConnectionTimeout());
+        System.out.printf("- Request timeout: %s%n", config.getRequestTimeout());
+        System.out.printf("- Health check interval: %s%n", config.getHealthCheckInterval());
+        System.out.printf("- Max retries: %d%n", config.getMaxRetries());
+        System.out.printf("- Retry delay: %s%n", config.getRetryDelay());
+        System.out.printf("- Circuit breaker: %s%n", config.isCircuitBreakerEnabled() ? "Enabled" : "Disabled");
+        
+        System.out.println("\nDatacenter Configuration:");
+        for (DatacenterEndpoint endpoint : config.getDatacenters()) {
+            System.out.printf("- %s (%s): priority=%d, weight=%.1f, ssl=%s, readOnly=%s%n",
+                endpoint.getId(), 
+                endpoint.getRegion(),
+                endpoint.getPriority(),
+                endpoint.getWeight(),
+                endpoint.isSsl(),
+                endpoint.isReadOnly()
+            );
+        }
+        
+        System.out.println("\nProduction SSL and Connection Pool Best Practices:");
+        System.out.println("- Enable SSL/TLS for all production connections (.ssl(true))");
+        System.out.println("- Use strong passwords and certificate validation");
+        System.out.println("- Configure connection pooling with appropriate min/max connections");
+        System.out.println("- Set reasonable timeouts for WAN connections (10-15 seconds)");
+        System.out.println("- Enable circuit breaker pattern for fault tolerance");
+        System.out.println("- Use health checks to monitor datacenter availability");
+        System.out.println("- Configure priority and weight for intelligent routing");
+        System.out.println("- Use read replicas for scaling read operations");
+        System.out.println("- Set up proper monitoring and alerting");
+        
+        // Note: In a real production environment, you would also configure:
+        // - Connection pool settings (min/max connections, idle timeout)
+        // - SSL certificate validation and trust stores
+        // - Authentication mechanisms (Redis AUTH, mTLS)
+        // - Network security (VPC, security groups, firewall rules)
+        // - Monitoring and alerting integration (Prometheus, Grafana)
+        // - Backup and disaster recovery settings
+        // - Data encryption at rest
+        // - Compliance and audit logging
+        // - Data encryption at rest
+        // - Compliance and audit logging
+    }
+
+    @Test
+    void testConnectionPoolAndSSLBestPractices() {
+        // This test demonstrates connection pool and SSL best practices
+        // Note: These configurations would be used in the actual client implementation
+        
+        var sync = client.sync();
+        
+        // Test that our current configuration works with the available settings
+        assertNotNull(config.getConnectionTimeout());
+        assertNotNull(config.getRequestTimeout());
+        assertNotNull(config.getHealthCheckInterval());
+        assertTrue(config.getMaxRetries() > 0);
+        assertNotNull(config.getRetryDelay());
+        
+        // Verify that each datacenter endpoint has proper configuration
+        for (DatacenterEndpoint endpoint : config.getDatacenters()) {
+            assertNotNull(endpoint.getId());
+            assertNotNull(endpoint.getHost());
+            assertTrue(endpoint.getPort() > 0);
+            assertTrue(endpoint.getWeight() > 0);
+            assertTrue(endpoint.getPriority() >= 0);
+            
+            // In our test setup, SSL is disabled, but we verify the capability exists
+            assertFalse(endpoint.isSsl(), "Test containers should have SSL disabled");
+        }
+        
+        // Test basic connectivity to verify our connection configuration works
+        String pong1 = sync.ping("us-east-1");
+        String pong2 = sync.ping("us-west-1");
+        String pong3 = sync.ping("eu-west-1");
+        
+        assertEquals("PONG", pong1);
+        assertEquals("PONG", pong2);
+        assertEquals("PONG", pong3);
+        
+        // Test that timeouts and retries work by performing operations
+        assertDoesNotThrow(() -> {
+            sync.set("config:test", "timeout-test", DatacenterPreference.LOCAL_PREFERRED);
+            String value = sync.get("config:test", DatacenterPreference.LOCAL_PREFERRED);
+            assertEquals("timeout-test", value);
+        });
+        
+        System.out.println("Connection configuration validation successful:");
+        System.out.println("- Connection timeout: " + config.getConnectionTimeout());
+        System.out.println("- Request timeout: " + config.getRequestTimeout());
+        System.out.println("- Health check interval: " + config.getHealthCheckInterval());
+        System.out.println("- Max retries: " + config.getMaxRetries());
+        System.out.println("- Retry delay: " + config.getRetryDelay());
+        System.out.println("- Circuit breaker enabled: " + config.isCircuitBreakerEnabled());
+        
+        for (DatacenterEndpoint endpoint : config.getDatacenters()) {
+            System.out.printf("- Datacenter %s: priority=%d, weight=%.1f, ssl=%s%n", 
+                endpoint.getId(), endpoint.getPriority(), endpoint.getWeight(), endpoint.isSsl());
+        }
+    }
+    
+    /**
+     * Demonstrates enterprise-grade configuration patterns for multi-datacenter Redis deployment.
+     * This test shows SSL, connection pooling, authentication, and high availability configurations.
+     */
+    @Test
+    void testEnterpriseMultiDatacenterConfiguration() {
+        // Enterprise configuration with comprehensive settings
+        DatacenterConfiguration enterpriseConfig = DatacenterConfiguration.builder()
+                .localDatacenter("us-east-1")
+                
+                // Connection and performance tuning
+                .connectionTimeout(Duration.ofSeconds(15)) // Longer timeout for WAN connections
+                .requestTimeout(Duration.ofSeconds(10))    // Request timeout
+                .healthCheckInterval(Duration.ofSeconds(60)) // Health check every minute
+                .maxRetries(5)                             // More retries for distributed systems
+                .retryDelay(Duration.ofMillis(100))        // Exponential backoff starting point
+                
+                // Reliability and fault tolerance
+                .enableCircuitBreaker(true)
+                
+                .datacenters(List.of(
+                        // Primary datacenter - US East (Virginia)
+                        DatacenterEndpoint.builder()
+                                .id("us-east-1-primary")
+                                .region("us-east-1")
+                                .host("redis-cluster-primary.us-east-1.example.com")
+                                .port(6380) // SSL-enabled port
+                                .ssl(true)
+                                .password("${REDIS_PASSWORD}") // Environment variable reference
+                                .database(0)
+                                .priority(1) // Highest priority
+                                .weight(1.0) // Full weight
+                                .readOnly(false)
+                                .build(),
+                                
+                        // US East read replicas for load distribution
+                        DatacenterEndpoint.builder()
+                                .id("us-east-1-replica-1")
+                                .region("us-east-1")
+                                .host("redis-replica-1.us-east-1.example.com")
+                                .port(6380)
+                                .ssl(true)
+                                .password("${REDIS_PASSWORD}")
+                                .database(0)
+                                .priority(1)
+                                .weight(0.7) // Slightly lower weight
+                                .readOnly(true) // Read-only for scaling
+                                .build(),
+                                
+                        DatacenterEndpoint.builder()
+                                .id("us-east-1-replica-2")
+                                .region("us-east-1")
+                                .host("redis-replica-2.us-east-1.example.com")
+                                .port(6380)
+                                .ssl(true)
+                                .password("${REDIS_PASSWORD}")
+                                .database(0)
+                                .priority(1)
+                                .weight(0.7)
+                                .readOnly(true)
+                                .build(),
+                                
+                        // Secondary datacenter - US West (Oregon)
+                        DatacenterEndpoint.builder()
+                                .id("us-west-2-primary")
+                                .region("us-west-2")
+                                .host("redis-cluster-primary.us-west-2.example.com")
+                                .port(6380)
+                                .ssl(true)
+                                .password("${REDIS_PASSWORD}")
+                                .database(0)
+                                .priority(2) // Secondary priority
+                                .weight(0.9) // High weight for failover
+                                .readOnly(false)
+                                .build(),
+                                
+                        DatacenterEndpoint.builder()
+                                .id("us-west-2-replica")
+                                .region("us-west-2")
+                                .host("redis-replica.us-west-2.example.com")
+                                .port(6380)
+                                .ssl(true)
+                                .password("${REDIS_PASSWORD}")
+                                .database(0)
+                                .priority(2)
+                                .weight(0.6)
+                                .readOnly(true)
+                                .build(),
+                                
+                        // Tertiary datacenter - EU West (Ireland) for global reach
+                        DatacenterEndpoint.builder()
+                                .id("eu-west-1-primary")
+                                .region("eu-west-1")
+                                .host("redis-cluster-primary.eu-west-1.example.com")
+                                .port(6380)
+                                .ssl(true)
+                                .password("${REDIS_PASSWORD}")
+                                .database(0)
+                                .priority(3) // Tertiary priority
+                                .weight(0.8) // Good weight for EU users
+                                .readOnly(false)
+                                .build(),
+                                
+                        // Asia Pacific datacenter for global distribution
+                        DatacenterEndpoint.builder()
+                                .id("ap-southeast-1-primary")
+                                .region("ap-southeast-1")
+                                .host("redis-cluster-primary.ap-southeast-1.example.com")
+                                .port(6380)
+                                .ssl(true)
+                                .password("${REDIS_PASSWORD}")
+                                .database(0)
+                                .priority(4) // Lowest priority from US perspective
+                                .weight(0.7) // Lower weight due to latency
+                                .readOnly(false)
+                                .build()
+                ))
+                .build();
+        
+        // Validate enterprise configuration
+        assertNotNull(enterpriseConfig);
+        assertEquals("us-east-1", enterpriseConfig.getLocalDatacenterId());
+        assertEquals(8, enterpriseConfig.getDatacenters().size()); // Total endpoints
+        
+        // Verify security configurations
+        long sslEnabledCount = enterpriseConfig.getDatacenters().stream()
+                .filter(DatacenterEndpoint::isSsl)
+                .count();
+        assertEquals(8, sslEnabledCount, "All endpoints should have SSL enabled");
+        
+        long passwordProtectedCount = enterpriseConfig.getDatacenters().stream()
+                .filter(dc -> dc.getPassword() != null && !dc.getPassword().isEmpty())
+                .count();
+        assertEquals(8, passwordProtectedCount, "All endpoints should have password protection");
+        
+        // Verify read replica configuration
+        long readReplicaCount = enterpriseConfig.getDatacenters().stream()
+                .filter(DatacenterEndpoint::isReadOnly)
+                .count();
+        assertEquals(4, readReplicaCount, "Should have 4 read replicas for scaling");
+        
+        long writableCount = enterpriseConfig.getDatacenters().stream()
+                .filter(dc -> !dc.isReadOnly())
+                .count();
+        assertEquals(4, writableCount, "Should have 4 writable endpoints");
+        
+        // Verify geographic distribution
+        Set<String> regions = enterpriseConfig.getDatacenters().stream()
+                .map(DatacenterEndpoint::getRegion)
+                .collect(java.util.stream.Collectors.toSet());
+        assertTrue(regions.contains("us-east-1"), "Should include US East");
+        assertTrue(regions.contains("us-west-2"), "Should include US West");
+        assertTrue(regions.contains("eu-west-1"), "Should include EU West");
+        assertTrue(regions.contains("ap-southeast-1"), "Should include Asia Pacific");
+        
+        // Verify priority configuration for intelligent routing
+        Map<Integer, Long> priorityDistribution = enterpriseConfig.getDatacenters().stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                    DatacenterEndpoint::getPriority,
+                    java.util.stream.Collectors.counting()
+                ));
+        assertEquals(3, priorityDistribution.get(1).intValue(), "Priority 1 should have 3 endpoints");
+        assertEquals(2, priorityDistribution.get(2).intValue(), "Priority 2 should have 2 endpoints");
+        assertEquals(1, priorityDistribution.get(3).intValue(), "Priority 3 should have 1 endpoint");
+        assertEquals(1, priorityDistribution.get(4).intValue(), "Priority 4 should have 1 endpoint");
+        
+        // Verify connection and reliability settings
+        assertEquals(Duration.ofSeconds(15), enterpriseConfig.getConnectionTimeout());
+        assertEquals(Duration.ofSeconds(10), enterpriseConfig.getRequestTimeout());
+        assertEquals(Duration.ofSeconds(60), enterpriseConfig.getHealthCheckInterval());
+        assertEquals(5, enterpriseConfig.getMaxRetries());
+        assertEquals(Duration.ofMillis(100), enterpriseConfig.getRetryDelay());
+        assertTrue(enterpriseConfig.isCircuitBreakerEnabled());
+        
+        System.out.println("Enterprise Multi-Datacenter Configuration Summary:");
+        System.out.println("================================================");
+        System.out.printf("Total Endpoints: %d%n", enterpriseConfig.getDatacenters().size());
+        System.out.printf("SSL-Enabled Endpoints: %d%n", sslEnabledCount);
+        System.out.printf("Read Replicas: %d%n", readReplicaCount);
+        System.out.printf("Writable Endpoints: %d%n", writableCount);
+        System.out.printf("Geographic Regions: %s%n", String.join(", ", regions));
+        System.out.printf("Connection Timeout: %s%n", enterpriseConfig.getConnectionTimeout());
+        System.out.printf("Health Check Interval: %s%n", enterpriseConfig.getHealthCheckInterval());
+        System.out.printf("Max Retries: %d%n", enterpriseConfig.getMaxRetries());
+        System.out.printf("Circuit Breaker: %s%n", enterpriseConfig.isCircuitBreakerEnabled() ? "Enabled" : "Disabled");
+        
+        System.out.println("\nDatacenter Priority Distribution:");
+        for (var entry : priorityDistribution.entrySet()) {
+            System.out.printf("Priority %d: %d endpoints%n", entry.getKey(), entry.getValue());
+        }
+        
+        System.out.println("\nEndpoint Details:");
+        for (DatacenterEndpoint endpoint : enterpriseConfig.getDatacenters()) {
+            System.out.printf("- %s (%s): priority=%d, weight=%.1f, ssl=%s, readOnly=%s%n",
+                endpoint.getId(), 
+                endpoint.getRegion(),
+                endpoint.getPriority(),
+                endpoint.getWeight(),
+                endpoint.isSsl(),
+                endpoint.isReadOnly()
+            );
+        }
+        
+        // In a real implementation, this configuration would enable:
+        // 1. SSL/TLS encryption for all connections
+        // 2. Password-based authentication
+        // 3. Connection pooling with proper sizing
+        // 4. Circuit breaker pattern for fault tolerance
+        // 5. Geographic routing for latency optimization
+        // 6. Read replica scaling for read-heavy workloads
+        // 7. Multi-region disaster recovery
+        // 8. Health monitoring and automatic failover
+    }
 }

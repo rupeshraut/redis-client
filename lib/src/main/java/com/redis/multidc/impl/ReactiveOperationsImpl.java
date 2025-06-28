@@ -3,6 +3,7 @@ package com.redis.multidc.impl;
 import com.redis.multidc.operations.ReactiveOperations;
 import com.redis.multidc.routing.DatacenterRouter;
 import com.redis.multidc.observability.MetricsCollector;
+import com.redis.multidc.resilience.ResilienceManager;
 import com.redis.multidc.model.DatacenterInfo;
 import com.redis.multidc.model.DatacenterPreference;
 import com.redis.multidc.model.TombstoneKey;
@@ -30,6 +31,7 @@ public class ReactiveOperationsImpl implements ReactiveOperations {
     private final Map<String, RedisReactiveCommands<String, String>> datacenterConnections;
     private final DatacenterRouter router;
     private final MetricsCollector metricsCollector;
+    private final ResilienceManager resilienceManager;
     private final DatacenterConfiguration configuration;
     private final Map<String, TombstoneKey> tombstoneCache = new ConcurrentHashMap<>();
 
@@ -37,10 +39,12 @@ public class ReactiveOperationsImpl implements ReactiveOperations {
             Map<String, RedisReactiveCommands<String, String>> datacenterConnections,
             DatacenterRouter router,
             MetricsCollector metricsCollector,
+            ResilienceManager resilienceManager,
             DatacenterConfiguration configuration) {
         this.datacenterConnections = datacenterConnections;
         this.router = router;
         this.metricsCollector = metricsCollector;
+        this.resilienceManager = resilienceManager;
         this.configuration = configuration;
     }
 
@@ -52,11 +56,9 @@ public class ReactiveOperationsImpl implements ReactiveOperations {
 
     @Override
     public Mono<String> get(String key, DatacenterPreference preference) {
-        Instant startTime = Instant.now();
         return Mono.fromCallable(() -> {
             if (isTombstoneKey(key)) {
-                metricsCollector.recordRequest("tombstone", Duration.between(startTime, Instant.now()), true);
-                return null;
+                return Optional.<String>empty();
             }
             return router.selectDatacenterForRead(preference);
         })
@@ -65,16 +67,8 @@ public class ReactiveOperationsImpl implements ReactiveOperations {
                 String datacenterId = datacenterOpt.get();
                 RedisReactiveCommands<String, String> commands = datacenterConnections.get(datacenterId);
                 if (commands != null) {
-                    return commands.get(key)
-                        .timeout(Duration.ofMillis(5000))
-                        .doOnSuccess(value -> {
-                            Duration latency = Duration.between(startTime, Instant.now());
-                            metricsCollector.recordRequest(datacenterId, latency, true);
-                        })
-                        .onErrorResume(error -> {
-                            metricsCollector.recordRequest(datacenterId, Duration.ZERO, false);
-                            return Mono.empty();
-                        });
+                    return executeWithMetricsAndResilience(datacenterId, "GET", 
+                        commands.get(key).timeout(Duration.ofMillis(5000)));
                 }
             }
             return Mono.empty();
@@ -953,5 +947,23 @@ public class ReactiveOperationsImpl implements ReactiveOperations {
             .expiresIn(Duration.ofHours(24))
             .build();
         tombstoneCache.put(key, tombstone);
+    }
+
+    // Helper method to execute operations with metrics and resilience patterns
+    private <T> Mono<T> executeWithMetricsAndResilience(String datacenterId, String operation, Mono<T> operationMono) {
+        Instant startTime = Instant.now();
+        
+        // Use ResilienceManager to decorate the reactive operation with all resilience patterns
+        return resilienceManager.decorateMono(datacenterId, operationMono)
+            .doOnSuccess(value -> {
+                Duration latency = Duration.between(startTime, Instant.now());
+                metricsCollector.recordRequest(datacenterId, latency, true);
+            })
+            .doOnError(error -> {
+                Duration latency = Duration.between(startTime, Instant.now());
+                metricsCollector.recordRequest(datacenterId, latency, false);
+                logger.error("Reactive operation {} failed for datacenter {}: {}", 
+                    operation, datacenterId, error.getMessage());
+            });
     }
 }

@@ -4,7 +4,10 @@ import com.redis.multidc.model.DatacenterPreference;
 import com.redis.multidc.model.TombstoneKey;
 import com.redis.multidc.observability.MetricsCollector;
 import com.redis.multidc.operations.SyncOperations;
+import com.redis.multidc.pool.ConnectionPool;
+import com.redis.multidc.pool.ConnectionPoolManager;
 import com.redis.multidc.routing.DatacenterRouter;
+import com.redis.multidc.resilience.ResilienceManager;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
 import org.slf4j.Logger;
@@ -25,15 +28,33 @@ public class SyncOperationsImpl implements SyncOperations {
     private static final Logger logger = LoggerFactory.getLogger(SyncOperationsImpl.class);
     
     private final DatacenterRouter router;
-    private final Map<String, StatefulRedisConnection<String, String>> connections;
+    private final ConnectionPoolManager poolManager;
+    private final Map<String, StatefulRedisConnection<String, String>> connections; // Legacy support
     private final MetricsCollector metricsCollector;
+    private final ResilienceManager resilienceManager;
     
+    // Constructor with connection pool manager (preferred)
+    public SyncOperationsImpl(DatacenterRouter router, 
+                             ConnectionPoolManager poolManager,
+                             MetricsCollector metricsCollector,
+                             ResilienceManager resilienceManager) {
+        this.router = router;
+        this.poolManager = poolManager;
+        this.connections = null;
+        this.metricsCollector = metricsCollector;
+        this.resilienceManager = resilienceManager;
+    }
+    
+    // Legacy constructor for backward compatibility
     public SyncOperationsImpl(DatacenterRouter router, 
                              Map<String, StatefulRedisConnection<String, String>> connections,
-                             MetricsCollector metricsCollector) {
+                             MetricsCollector metricsCollector,
+                             ResilienceManager resilienceManager) {
         this.router = router;
+        this.poolManager = null;
         this.connections = connections;
         this.metricsCollector = metricsCollector;
+        this.resilienceManager = resilienceManager;
     }
     
     @Override
@@ -48,10 +69,14 @@ public class SyncOperationsImpl implements SyncOperations {
             throw new RuntimeException("No available datacenter for read operation");
         }
         
-        return executeWithMetrics(datacenterId.get(), "GET", () -> {
-            RedisCommands<String, String> commands = getCommands(datacenterId.get());
-            return commands.get(key);
-        });
+        if (poolManager != null) {
+            return executeWithPool(datacenterId.get(), "GET", commands -> commands.get(key));
+        } else {
+            return executeWithMetrics(datacenterId.get(), "GET", () -> {
+                RedisCommands<String, String> commands = getCommands(datacenterId.get());
+                return commands.get(key);
+            });
+        }
     }
     
     @Override
@@ -66,11 +91,18 @@ public class SyncOperationsImpl implements SyncOperations {
             throw new RuntimeException("No available datacenter for write operation");
         }
         
-        executeWithMetrics(datacenterId.get(), "SET", () -> {
-            RedisCommands<String, String> commands = getCommands(datacenterId.get());
-            commands.set(key, value);
-            return null;
-        });
+        if (poolManager != null) {
+            executeWithPool(datacenterId.get(), "SET", commands -> {
+                commands.set(key, value);
+                return null;
+            });
+        } else {
+            executeWithMetrics(datacenterId.get(), "SET", () -> {
+                RedisCommands<String, String> commands = getCommands(datacenterId.get());
+                commands.set(key, value);
+                return null;
+            });
+        }
     }
     
     @Override
@@ -248,13 +280,20 @@ public class SyncOperationsImpl implements SyncOperations {
         });
     }
     
-    // Helper method to execute operations with metrics
+    // Helper method to execute operations with metrics and resilience patterns
     private <T> T executeWithMetrics(String datacenterId, String operation, OperationSupplier<T> supplier) {
         long startTime = System.currentTimeMillis();
         boolean success = false;
         
         try {
-            T result = supplier.get();
+            // Use ResilienceManager to decorate the operation with all resilience patterns
+            T result = resilienceManager.decorateSupplier(datacenterId, () -> {
+                try {
+                    return supplier.get();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).get();
             success = true;
             return result;
         } catch (Exception e) {
@@ -267,6 +306,10 @@ public class SyncOperationsImpl implements SyncOperations {
     }
     
     private RedisCommands<String, String> getCommands(String datacenterId) {
+        if (poolManager != null) {
+            throw new RuntimeException("Use executeWithPool for connection pool operations");
+        }
+        
         StatefulRedisConnection<String, String> connection = connections.get(datacenterId);
         if (connection == null) {
             throw new RuntimeException("No connection available for datacenter: " + datacenterId);
@@ -274,9 +317,52 @@ public class SyncOperationsImpl implements SyncOperations {
         return connection.sync();
     }
     
+    // Helper method for operations using connection pools
+    private <T> T executeWithPool(String datacenterId, String operation, PoolOperationFunction<T> function) {
+        if (poolManager == null) {
+            throw new RuntimeException("Connection pool manager not available");
+        }
+        
+        long startTime = System.currentTimeMillis();
+        boolean success = false;
+        
+        try {
+            // Use ResilienceManager to decorate the operation with all resilience patterns
+            T result = resilienceManager.decorateSupplier(datacenterId, () -> {
+                try {
+                    return poolManager.getConnection(datacenterId)
+                        .thenCompose(pooledConnection -> {
+                            try (pooledConnection) {
+                                return java.util.concurrent.CompletableFuture.completedFuture(
+                                    function.apply(pooledConnection.sync()));
+                            } catch (Exception e) {
+                                return java.util.concurrent.CompletableFuture.failedFuture(e);
+                            }
+                        })
+                        .get();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).get();
+            success = true;
+            return result;
+        } catch (Exception e) {
+            logger.error("Pool operation {} failed for datacenter {}: {}", operation, datacenterId, e.getMessage());
+            throw new RuntimeException("Redis pool operation failed", e);
+        } finally {
+            Duration latency = Duration.ofMillis(System.currentTimeMillis() - startTime);
+            metricsCollector.recordRequest(datacenterId, latency, success);
+        }
+    }
+    
     @FunctionalInterface
     private interface OperationSupplier<T> {
         T get() throws Exception;
+    }
+    
+    @FunctionalInterface
+    private interface PoolOperationFunction<T> {
+        T apply(RedisCommands<String, String> commands) throws Exception;
     }
     
     // Hash operations - implementing remaining ones

@@ -18,8 +18,7 @@ public class DatacenterConfiguration {
     private final Duration requestTimeout;
     private final int maxRetries;
     private final Duration retryDelay;
-    private final boolean enableCircuitBreaker;
-    private final CircuitBreakerConfig circuitBreakerConfig;
+    private final ResilienceConfig resilienceConfig;
     private final Map<String, Object> additionalProperties;
     
     private DatacenterConfiguration(Builder builder) {
@@ -31,8 +30,7 @@ public class DatacenterConfiguration {
         this.requestTimeout = builder.requestTimeout;
         this.maxRetries = builder.maxRetries;
         this.retryDelay = builder.retryDelay;
-        this.enableCircuitBreaker = builder.enableCircuitBreaker;
-        this.circuitBreakerConfig = builder.circuitBreakerConfig;
+        this.resilienceConfig = builder.resilienceConfig;
         this.additionalProperties = Map.copyOf(builder.additionalProperties);
     }
     
@@ -68,12 +66,24 @@ public class DatacenterConfiguration {
         return retryDelay;
     }
     
-    public boolean isCircuitBreakerEnabled() {
-        return enableCircuitBreaker;
+    public ResilienceConfig getResilienceConfig() {
+        return resilienceConfig;
     }
     
-    public CircuitBreakerConfig getCircuitBreakerConfig() {
-        return circuitBreakerConfig;
+    /**
+     * @deprecated Use getResilienceConfig().isCircuitBreakerEnabled() instead.
+     */
+    @Deprecated(since = "2.0.0", forRemoval = true)
+    public boolean isCircuitBreakerEnabled() {
+        return resilienceConfig.isCircuitBreakerEnabled();
+    }
+    
+    /**
+     * @deprecated Use getResilienceConfig().getCircuitBreakerConfig() instead.
+     */
+    @Deprecated(since = "2.0.0", forRemoval = true)
+    public io.github.resilience4j.circuitbreaker.CircuitBreakerConfig getCircuitBreakerConfig() {
+        return resilienceConfig.getCircuitBreakerConfig();
     }
     
     public Map<String, Object> getAdditionalProperties() {
@@ -93,8 +103,7 @@ public class DatacenterConfiguration {
         private Duration requestTimeout = Duration.ofSeconds(10);
         private int maxRetries = 3;
         private Duration retryDelay = Duration.ofMillis(100);
-        private boolean enableCircuitBreaker = true;
-        private CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.defaultConfig();
+        private ResilienceConfig resilienceConfig = ResilienceConfig.defaultConfig();
         private Map<String, Object> additionalProperties = Map.of();
         
         public Builder datacenters(List<DatacenterEndpoint> datacenters) {
@@ -137,13 +146,36 @@ public class DatacenterConfiguration {
             return this;
         }
         
-        public Builder enableCircuitBreaker(boolean enable) {
-            this.enableCircuitBreaker = enable;
+        public Builder resilienceConfig(ResilienceConfig config) {
+            this.resilienceConfig = config;
             return this;
         }
         
-        public Builder circuitBreakerConfig(CircuitBreakerConfig config) {
-            this.circuitBreakerConfig = config;
+        /**
+         * @deprecated Use resilienceConfig(ResilienceConfig.builder().enableCircuitBreaker(enable).build()) instead.
+         */
+        @Deprecated(since = "2.0.0", forRemoval = true)
+        public Builder enableCircuitBreaker(boolean enable) {
+            this.resilienceConfig = ResilienceConfig.builder()
+                    .circuitBreaker(this.resilienceConfig.getCircuitBreakerConfig())
+                    .retry(this.resilienceConfig.getRetryConfig())
+                    .enableCircuitBreaker(enable)
+                    .enableRetry(this.resilienceConfig.isRetryEnabled())
+                    .build();
+            return this;
+        }
+        
+        /**
+         * @deprecated Use resilienceConfig(ResilienceConfig.builder().circuitBreaker(config).build()) instead.
+         */
+        @Deprecated(since = "2.0.0", forRemoval = true)
+        public Builder circuitBreakerConfig(io.github.resilience4j.circuitbreaker.CircuitBreakerConfig config) {
+            this.resilienceConfig = ResilienceConfig.builder()
+                    .circuitBreaker(config)
+                    .retry(this.resilienceConfig.getRetryConfig())
+                    .enableCircuitBreaker(this.resilienceConfig.isCircuitBreakerEnabled())
+                    .enableRetry(this.resilienceConfig.isRetryEnabled())
+                    .build();
             return this;
         }
         

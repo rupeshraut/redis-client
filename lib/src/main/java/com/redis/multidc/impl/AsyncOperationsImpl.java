@@ -4,7 +4,9 @@ import com.redis.multidc.model.DatacenterPreference;
 import com.redis.multidc.model.TombstoneKey;
 import com.redis.multidc.observability.MetricsCollector;
 import com.redis.multidc.operations.AsyncOperations;
+import com.redis.multidc.pool.ConnectionPoolManager;
 import com.redis.multidc.routing.DatacenterRouter;
+import com.redis.multidc.resilience.ResilienceManager;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import org.slf4j.Logger;
@@ -26,15 +28,33 @@ public class AsyncOperationsImpl implements AsyncOperations {
     private static final Logger logger = LoggerFactory.getLogger(AsyncOperationsImpl.class);
     
     private final DatacenterRouter router;
-    private final Map<String, StatefulRedisConnection<String, String>> connections;
+    private final ConnectionPoolManager poolManager;
+    private final Map<String, StatefulRedisConnection<String, String>> connections; // Legacy support
     private final MetricsCollector metricsCollector;
+    private final ResilienceManager resilienceManager;
     
+    // Constructor with connection pool manager (preferred)
+    public AsyncOperationsImpl(DatacenterRouter router, 
+                              ConnectionPoolManager poolManager,
+                              MetricsCollector metricsCollector,
+                              ResilienceManager resilienceManager) {
+        this.router = router;
+        this.poolManager = poolManager;
+        this.connections = null;
+        this.metricsCollector = metricsCollector;
+        this.resilienceManager = resilienceManager;
+    }
+    
+    // Legacy constructor for backward compatibility
     public AsyncOperationsImpl(DatacenterRouter router, 
                               Map<String, StatefulRedisConnection<String, String>> connections,
-                              MetricsCollector metricsCollector) {
+                              MetricsCollector metricsCollector,
+                              ResilienceManager resilienceManager) {
         this.router = router;
+        this.poolManager = null;
         this.connections = connections;
         this.metricsCollector = metricsCollector;
+        this.resilienceManager = resilienceManager;
     }
     
     @Override
@@ -94,13 +114,20 @@ public class AsyncOperationsImpl implements AsyncOperations {
         });
     }
 
-    // Helper method to execute operations with metrics
+    // Helper method to execute operations with metrics and resilience patterns
     private <T> CompletableFuture<T> executeWithMetrics(String datacenterId, String operation, 
                                                        AsyncOperationSupplier<T> supplier) {
         long startTime = System.currentTimeMillis();
         
         try {
-            return supplier.get()
+            // Use ResilienceManager to decorate the async operation with all resilience patterns
+            return resilienceManager.decorateCompletionStage(datacenterId, () -> {
+                try {
+                    return supplier.get();
+                } catch (Exception e) {
+                    return CompletableFuture.failedFuture(e);
+                }
+            }).get()
                 .whenComplete((result, throwable) -> {
                     Duration latency = Duration.ofMillis(System.currentTimeMillis() - startTime);
                     boolean success = throwable == null;

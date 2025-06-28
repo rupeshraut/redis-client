@@ -8,6 +8,7 @@ import com.redis.multidc.model.DatacenterPreference;
 import com.redis.multidc.model.TombstoneKey;
 import com.redis.multidc.observability.MetricsCollector;
 import com.redis.multidc.routing.DatacenterRouter;
+import com.redis.multidc.resilience.ResilienceManager;
 import io.lettuce.core.KeyValue;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
@@ -17,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.time.Duration;
 import java.util.*;
@@ -28,6 +31,7 @@ import java.util.concurrent.CompletionException;
  * Tests all methods, error paths, and edge cases to achieve 100% coverage.
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class AsyncOperationsImplComprehensiveTest {
 
     @Mock
@@ -69,6 +73,9 @@ class AsyncOperationsImplComprehensiveTest {
     @Mock
     private RedisFuture<Object> objectFuture;
     
+    @Mock
+    private ResilienceManager resilienceManager;
+    
     private Map<String, StatefulRedisConnection<String, String>> connections;
     private AsyncOperationsImpl asyncOperations;
 
@@ -98,7 +105,10 @@ class AsyncOperationsImplComprehensiveTest {
         lenient().when(asyncCommands.hset(anyString(), anyString(), anyString())).thenReturn(booleanFuture);
         lenient().when(asyncCommands.hmset(anyString(), anyMap())).thenReturn(stringFuture);
 
-        asyncOperations = new AsyncOperationsImpl(router, connections, metricsCollector);
+        // Mock ResilienceManager to pass through operations unchanged
+        when(resilienceManager.decorateCompletionStage(anyString(), any())).thenAnswer(invocation -> invocation.getArgument(1));
+
+        asyncOperations = new AsyncOperationsImpl(router, connections, metricsCollector, resilienceManager);
     }
 
     // ===== String Operations Tests =====

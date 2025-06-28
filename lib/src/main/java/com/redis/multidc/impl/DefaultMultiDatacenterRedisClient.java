@@ -3,12 +3,17 @@ package com.redis.multidc.impl;
 import com.redis.multidc.MultiDatacenterRedisClient;
 import com.redis.multidc.config.DatacenterConfiguration;
 import com.redis.multidc.model.DatacenterInfo;
+import com.redis.multidc.model.DatacenterHealthListener;
 import com.redis.multidc.operations.AsyncOperations;
 import com.redis.multidc.operations.ReactiveOperations;
 import com.redis.multidc.operations.SyncOperations;
+import com.redis.multidc.pool.ConnectionPool;
+import com.redis.multidc.pool.ConnectionPoolManager;
+import com.redis.multidc.pool.ConnectionPoolMetrics;
 import com.redis.multidc.routing.DatacenterRouter;
 import com.redis.multidc.routing.DatacenterHealthMonitor;
 import com.redis.multidc.observability.MetricsCollector;
+import com.redis.multidc.resilience.ResilienceManager;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
@@ -36,12 +41,14 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
     private static final Logger logger = LoggerFactory.getLogger(DefaultMultiDatacenterRedisClient.class);
     
     private final DatacenterConfiguration configuration;
+    private final ConnectionPoolManager poolManager;
     private final Map<String, RedisClient> clients;
     private final Map<String, StatefulRedisConnection<String, String>> connections;
     private final Map<String, RedisReactiveCommands<String, String>> reactiveConnections;
     private final DatacenterRouter router;
     private final DatacenterHealthMonitor healthMonitor;
     private final MetricsCollector metricsCollector;
+    private final ResilienceManager resilienceManager;
     private final SyncOperations syncOperations;
     private final AsyncOperations asyncOperations;
     private final ReactiveOperations reactiveOperations;
@@ -56,23 +63,27 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
         this.healthEventSink = Sinks.many().multicast().onBackpressureBuffer();
         
         try {
-            // Initialize clients and connections for all datacenters
+            // Initialize connection pool manager
+            this.poolManager = new ConnectionPoolManager(configuration);
+            
+            // Initialize legacy connections for backward compatibility
             initializeConnections();
             
             // Initialize core components
             this.metricsCollector = new MetricsCollector(configuration);
+            this.resilienceManager = new ResilienceManager(configuration.getResilienceConfig());
             this.router = new DatacenterRouter(configuration, metricsCollector);
             this.healthMonitor = new DatacenterHealthMonitor(configuration, connections);
             
-            // Initialize operation interfaces
-            this.syncOperations = new SyncOperationsImpl(router, connections, metricsCollector);
-            this.asyncOperations = new AsyncOperationsImpl(router, connections, metricsCollector);
-            this.reactiveOperations = new ReactiveOperationsImpl(reactiveConnections, router, metricsCollector, configuration);
+            // Initialize operation interfaces with pool manager
+            this.syncOperations = new SyncOperationsImpl(router, poolManager, metricsCollector, resilienceManager);
+            this.asyncOperations = new AsyncOperationsImpl(router, poolManager, metricsCollector, resilienceManager);
+            this.reactiveOperations = new ReactiveOperationsImpl(reactiveConnections, router, metricsCollector, resilienceManager, configuration);
             
             // Start health monitoring
             healthMonitor.start();
             
-            logger.info("Multi-datacenter Redis client initialized with {} datacenters", 
+            logger.info("Multi-datacenter Redis client initialized with {} datacenters and connection pooling", 
                        configuration.getDatacenters().size());
             
         } catch (Exception e) {
@@ -170,6 +181,30 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
     }
     
     @Override
+    public ConnectionPoolMetrics getConnectionPoolMetrics(String datacenterId) {
+        checkNotClosed();
+        return poolManager.getPoolMetrics(datacenterId);
+    }
+    
+    @Override
+    public ConnectionPoolManager.AggregatedPoolMetrics getAggregatedPoolMetrics() {
+        checkNotClosed();
+        return poolManager.getAggregatedMetrics();
+    }
+    
+    @Override
+    public boolean areAllPoolsHealthy() {
+        checkNotClosed();
+        return poolManager.areAllPoolsHealthy();
+    }
+    
+    @Override
+    public void maintainAllConnectionPools() {
+        checkNotClosed();
+        poolManager.maintainAllPools();
+    }
+    
+    @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {
             logger.info("Closing multi-datacenter Redis client...");
@@ -184,7 +219,12 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
                 healthMonitor.stop();
             }
             
-            // Close all connections
+            // Close connection pool manager
+            if (poolManager != null) {
+                poolManager.close();
+            }
+            
+            // Close all connections (legacy support)
             connections.values().forEach(connection -> {
                 try {
                     connection.close();
@@ -193,7 +233,7 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
                 }
             });
             
-            // Shutdown all clients
+            // Shutdown all clients (legacy support)
             clients.values().forEach(client -> {
                 try {
                     client.shutdown();
