@@ -10,6 +10,7 @@ plugins {
     id 'maven-publish'
     id 'signing'
     id 'jacoco'
+    id 'info.solidsoft.pitest' version '1.15.0'
 }
 
 repositories {
@@ -61,6 +62,9 @@ dependencies {
     testImplementation "org.mockito:mockito-core:5.7.0"
     testImplementation "org.mockito:mockito-junit-jupiter:5.7.0"
     
+    // PIT JUnit 5 plugin
+    pitest 'org.pitest:pitest-junit5-plugin:1.2.1'
+    
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -100,3 +104,40 @@ jacocoTestCoverageVerification {
         }
     }
 }
+
+// PIT Mutation Testing Configuration
+pitest {
+    targetClasses = ['com.redis.multidc.impl.*', 'com.redis.multidc.routing.*', 'com.redis.multidc.observability.*']
+    targetTests = ['com.redis.multidc.*']
+    pitestVersion = '1.15.8'
+    threads = 4
+    outputFormats = ['XML', 'HTML']
+    timestampedReports = false
+    mutationThreshold = 70
+    coverageThreshold = 70
+    detectInlinedCode = true
+    exportLineCoverage = true
+    
+    // Mutators configuration - use default mutators for better compatibility
+    mutators = ['DEFAULTS']
+    
+    // Exclude certain packages/classes if needed
+    excludedClasses = [
+        'com.redis.multidc.config.*',
+        'com.redis.multidc.autoconfigure.*',
+        'com.redis.multidc.example.*',
+        'com.redis.multidc.model.*'
+    ]
+    
+    // Additional JVM args if needed
+    jvmArgs = ['-Xmx1024m']
+    
+    // Enable verbose logging for debugging
+    verbose = true
+    
+    // Configure test plugin
+    testPlugin = 'junit5'
+}
+
+// Make sure pitest runs after tests
+tasks.pitest.dependsOn test
