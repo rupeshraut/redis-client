@@ -108,6 +108,10 @@ public class ResilienceManager {
             decoratedSupplier = Bulkhead.decorateSupplier(getBulkhead(datacenterId), decoratedSupplier);
         }
         
+        // Note: TimeLimiter.decorateSupplier doesn't exist in Resilience4j
+        // TimeLimiter is only for CompletableFuture and reactive types
+        // For sync operations, we rely on command timeout in connection settings
+        
         return decoratedSupplier;
     }
     
