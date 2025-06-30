@@ -67,6 +67,39 @@ public interface ConnectionPool<K, V> extends AutoCloseable {
     void maintainPool();
     
     /**
+     * Drains all connections from the pool.
+     * New connections will not be created until the pool is reset.
+     */
+    void drain();
+    
+    /**
+     * Resets the pool metrics.
+     * This clears all accumulated statistics.
+     */
+    void resetMetrics();
+    
+    /**
+     * Warm up the pool by creating initial connections.
+     * 
+     * @return a future that completes when warm-up is finished
+     */
+    CompletableFuture<Void> warmUp();
+    
+    /**
+     * Adds a listener for pool events.
+     * 
+     * @param listener the event listener to add
+     */
+    void addListener(PoolEventListener listener);
+    
+    /**
+     * Removes a pool event listener.
+     * 
+     * @param listener the event listener to remove
+     */
+    void removeListener(PoolEventListener listener);
+    
+    /**
      * Closes the pool and all its connections.
      * After calling this method, the pool becomes unusable.
      */

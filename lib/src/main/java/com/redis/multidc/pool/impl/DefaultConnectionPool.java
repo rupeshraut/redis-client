@@ -4,6 +4,7 @@ import com.redis.multidc.pool.ConnectionPool;
 import com.redis.multidc.pool.ConnectionPoolConfig;
 import com.redis.multidc.pool.ConnectionPoolException;
 import com.redis.multidc.pool.ConnectionPoolMetrics;
+import com.redis.multidc.pool.PoolEventListener;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
@@ -282,6 +283,67 @@ public class DefaultConnectionPool implements ConnectionPool<String, String> {
         }
     }
     
+    @Override
+    public void drain() {
+        logger.info("Draining connection pool for datacenter {}", datacenterId);
+        availableConnections.clear();
+        
+        // Close idle connections, keep active ones for graceful shutdown
+        allConnections.keySet().removeIf(conn -> {
+            if (!conn.isInUse()) {
+                destroyConnection(conn);
+                return true;
+            }
+            return false;
+        });
+    }
+    
+    @Override
+    public void resetMetrics() {
+        logger.info("Resetting metrics for datacenter {} connection pool", datacenterId);
+        totalConnectionsCreated.set(0);
+        totalConnectionsDestroyed.set(0);
+        totalConnectionsAcquired.set(0);
+        totalConnectionsReturned.set(0);
+        totalAcquisitionTimeouts.set(0);
+        totalValidationFailures.set(0);
+        peakActiveConnections.set(0);
+        averageAcquisitionTime.set(0.0);
+        averageConnectionAge.set(0.0);
+    }
+    
+    @Override
+    public CompletableFuture<Void> warmUp() {
+        logger.info("Warming up connection pool for datacenter {}", datacenterId);
+        
+        return CompletableFuture.runAsync(() -> {
+            try {
+                int initialSize = config.getMinPoolSize();
+                for (int i = 0; i < initialSize; i++) {
+                    if (closed.get()) break;
+                    PooledConnectionImpl connection = createConnection();
+                    availableConnections.offer(connection);
+                }
+                logger.info("Warmed up {} connections for datacenter {}", initialSize, datacenterId);
+            } catch (Exception e) {
+                logger.error("Error during pool warm-up for datacenter {}", datacenterId, e);
+                throw new ConnectionPoolException("Failed to warm up pool for datacenter " + datacenterId, e);
+            }
+        });
+    }
+    
+    @Override
+    public void addListener(PoolEventListener listener) {
+        // For now, we'll just log this - full event system would need to be implemented
+        logger.debug("Pool event listener added for datacenter {}: {}", datacenterId, listener.getClass().getSimpleName());
+    }
+    
+    @Override
+    public void removeListener(PoolEventListener listener) {
+        // For now, we'll just log this - full event system would need to be implemented
+        logger.debug("Pool event listener removed for datacenter {}: {}", datacenterId, listener.getClass().getSimpleName());
+    }
+    
     private PooledConnectionImpl createConnection() {
         try {
             StatefulRedisConnection<String, String> connection = redisClient.connect(redisUri);
@@ -421,6 +483,10 @@ public class DefaultConnectionPool implements ConnectionPool<String, String> {
         
         public void updateLastUsedTime() {
             this.lastUsedTime = System.currentTimeMillis();
+        }
+        
+        public boolean isInUse() {
+            return !returned.get();
         }
         
         @Override

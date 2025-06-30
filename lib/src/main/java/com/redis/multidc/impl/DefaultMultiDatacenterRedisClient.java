@@ -4,12 +4,14 @@ import com.redis.multidc.MultiDatacenterRedisClient;
 import com.redis.multidc.config.DatacenterConfiguration;
 import com.redis.multidc.model.DatacenterInfo;
 import com.redis.multidc.model.DatacenterHealthListener;
+import com.redis.multidc.observability.HealthEventPublisher;
 import com.redis.multidc.operations.AsyncOperations;
 import com.redis.multidc.operations.ReactiveOperations;
 import com.redis.multidc.operations.SyncOperations;
 import com.redis.multidc.pool.ConnectionPool;
 import com.redis.multidc.pool.ConnectionPoolManager;
 import com.redis.multidc.pool.ConnectionPoolMetrics;
+import com.redis.multidc.pool.PoolEventListener;
 import com.redis.multidc.routing.DatacenterRouter;
 import com.redis.multidc.routing.DatacenterHealthMonitor;
 import com.redis.multidc.observability.MetricsCollector;
@@ -48,6 +50,7 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
     private final DatacenterRouter router;
     private final DatacenterHealthMonitor healthMonitor;
     private final MetricsCollector metricsCollector;
+    private final HealthEventPublisher eventPublisher;
     private final ResilienceManager resilienceManager;
     private final SyncOperations syncOperations;
     private final AsyncOperations asyncOperations;
@@ -63,6 +66,9 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
         this.healthEventSink = Sinks.many().multicast().onBackpressureBuffer();
         
         try {
+            // Initialize event publisher
+            this.eventPublisher = new HealthEventPublisher();
+            
             // Initialize connection pool manager
             this.poolManager = new ConnectionPoolManager(configuration);
             
@@ -249,9 +255,59 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
             
         } catch (Exception e) {
             logger.error("Error during cleanup", e);
+        } finally {
+            // Close event publisher
+            if (eventPublisher != null) {
+                eventPublisher.close();
+            }
         }
     }
     
+    
+    @Override
+    public boolean isConnectionPoolHealthy(String datacenterId) {
+        checkNotClosed();
+        return poolManager.isPoolHealthy(datacenterId);
+    }
+    
+    @Override
+    public Map<String, Boolean> getConnectionPoolHealth() {
+        checkNotClosed();
+        return poolManager.getPoolHealth();
+    }
+    
+    @Override
+    public void drainConnectionPool(String datacenterId) {
+        checkNotClosed();
+        poolManager.drainPool(datacenterId);
+        logger.info("Connection pool drained for datacenter: {}", datacenterId);
+    }
+    
+    @Override
+    public void resetConnectionPoolMetrics(String datacenterId) {
+        checkNotClosed();
+        poolManager.resetMetrics(datacenterId);
+        logger.info("Connection pool metrics reset for datacenter: {}", datacenterId);
+    }
+    
+    @Override
+    public Map<String, ConnectionPoolMetrics> getAllConnectionPoolMetrics() {
+        checkNotClosed();
+        return poolManager.getAllMetrics();
+    }
+    
+    @Override
+    public Disposable subscribeToPoolEvents(PoolEventListener listener) {
+        checkNotClosed();
+        return eventPublisher.subscribeToPoolEvents(notification -> 
+            listener.onPoolEvent(
+                notification.getDatacenterId(), 
+                notification.getEvent(), 
+                notification.getDetails()
+            )
+        );
+    }
+
     private void checkNotClosed() {
         if (closed.get()) {
             throw new IllegalStateException("Redis client has been closed");

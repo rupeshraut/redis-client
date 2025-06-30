@@ -192,6 +192,84 @@ public class ConnectionPoolManager implements AutoCloseable {
     }
     
     /**
+     * Check if a specific pool is healthy.
+     * 
+     * @param datacenterId the datacenter identifier
+     * @return true if the pool is healthy and can provide connections
+     */
+    public boolean isPoolHealthy(String datacenterId) {
+        ConnectionPool<String, String> pool = pools.get(datacenterId);
+        if (pool == null) {
+            return false;
+        }
+        
+        ConnectionPoolMetrics metrics = pool.getMetrics();
+        // Consider pool healthy if:
+        // 1. Efficiency ratio > 90%
+        // 2. Utilization < 95%
+        // 3. Average acquisition time < 1000ms
+        return metrics.getEfficiencyRatio() > 0.9 &&
+               metrics.getUtilizationPercentage() < 95.0 &&
+               metrics.getAverageAcquisitionTime() < 1000.0;
+    }
+    
+    /**
+     * Get health status of all pools.
+     * 
+     * @return map of datacenter ID to health status
+     */
+    public Map<String, Boolean> getPoolHealth() {
+        Map<String, Boolean> health = new ConcurrentHashMap<>();
+        for (String datacenterId : pools.keySet()) {
+            health.put(datacenterId, isPoolHealthy(datacenterId));
+        }
+        return health;
+    }
+    
+    /**
+     * Drain connections from a specific pool.
+     * 
+     * @param datacenterId the datacenter identifier
+     */
+    public void drainPool(String datacenterId) {
+        ConnectionPool<String, String> pool = pools.get(datacenterId);
+        if (pool != null) {
+            pool.drain();
+            logger.info("Pool drained for datacenter: {}", datacenterId);
+        } else {
+            logger.warn("Cannot drain pool for unknown datacenter: {}", datacenterId);
+        }
+    }
+    
+    /**
+     * Reset metrics for a specific pool.
+     * 
+     * @param datacenterId the datacenter identifier
+     */
+    public void resetMetrics(String datacenterId) {
+        ConnectionPool<String, String> pool = pools.get(datacenterId);
+        if (pool != null) {
+            pool.resetMetrics();
+            logger.info("Pool metrics reset for datacenter: {}", datacenterId);
+        } else {
+            logger.warn("Cannot reset metrics for unknown datacenter: {}", datacenterId);
+        }
+    }
+    
+    /**
+     * Get metrics for all pools.
+     * 
+     * @return map of datacenter ID to pool metrics
+     */
+    public Map<String, ConnectionPoolMetrics> getAllMetrics() {
+        Map<String, ConnectionPoolMetrics> allMetrics = new ConcurrentHashMap<>();
+        for (Map.Entry<String, ConnectionPool<String, String>> entry : pools.entrySet()) {
+            allMetrics.put(entry.getKey(), entry.getValue().getMetrics());
+        }
+        return allMetrics;
+    }
+    
+    /**
      * Aggregated metrics across all connection pools.
      */
     public static class AggregatedPoolMetrics {
