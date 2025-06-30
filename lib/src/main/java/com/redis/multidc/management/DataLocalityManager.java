@@ -3,6 +3,7 @@ package com.redis.multidc.management;
 import com.redis.multidc.MultiDatacenterRedisClient;
 import com.redis.multidc.config.DatacenterConfiguration;
 import com.redis.multidc.config.DatacenterEndpoint;
+import com.redis.multidc.model.CircuitBreakerState;
 import com.redis.multidc.model.DatacenterInfo;
 import com.redis.multidc.model.DatacenterPreference;
 import com.redis.multidc.routing.DatacenterRouter;
@@ -93,30 +94,26 @@ public class DataLocalityManager implements AutoCloseable {
      * @param key the key to analyze
      * @return future with optimal datacenter for reads
      */
-    public CompletableFuture<DatacenterInfo> getOptimalReadDatacenter(String key) {
+    public CompletableFuture<Optional<String>> getOptimalReadDatacenter(String key) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 AccessPattern pattern = accessPatterns.get(key);
                 if (pattern == null) {
                     // No access pattern data, use router's default logic
-                    return router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED, false);
+                    return router.selectDatacenterForRead(DatacenterPreference.LOCAL_PREFERRED);
                 }
                 
                 // Find datacenter with lowest average read latency
                 String optimalDatacenterId = pattern.getOptimalReadDatacenter();
                 if (optimalDatacenterId != null) {
-                    return datacenterConfig.getDatacenters().stream()
-                        .filter(dc -> dc.getId().equals(optimalDatacenterId))
-                        .map(dc -> createDatacenterInfo(dc))
-                        .findFirst()
-                        .orElse(router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED, false));
+                    return Optional.of(optimalDatacenterId);
                 }
                 
-                return router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED, false);
+                return router.selectDatacenterForRead(DatacenterPreference.LOCAL_PREFERRED);
                 
             } catch (Exception e) {
                 logger.error("Error determining optimal read datacenter for key: {}", key, e);
-                return router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED);
+                return router.selectDatacenterForRead(DatacenterPreference.LOCAL_PREFERRED);
             }
         });
     }
@@ -127,29 +124,25 @@ public class DataLocalityManager implements AutoCloseable {
      * @param key the key to analyze
      * @return future with optimal datacenter for writes
      */
-    public CompletableFuture<DatacenterInfo> getOptimalWriteDatacenter(String key) {
+    public CompletableFuture<Optional<String>> getOptimalWriteDatacenter(String key) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 AccessPattern pattern = accessPatterns.get(key);
                 if (pattern == null) {
-                    return router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED, false);
+                    return router.selectDatacenterForWrite(DatacenterPreference.LOCAL_PREFERRED);
                 }
                 
                 // Find datacenter with most write activity
                 String optimalDatacenterId = pattern.getOptimalWriteDatacenter();
                 if (optimalDatacenterId != null) {
-                    return datacenterConfig.getDatacenters().stream()
-                        .filter(dc -> dc.getId().equals(optimalDatacenterId))
-                        .map(dc -> createDatacenterInfo(dc))
-                        .findFirst()
-                        .orElse(router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED, false));
+                    return Optional.of(optimalDatacenterId);
                 }
                 
-                return router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED, false);
+                return router.selectDatacenterForWrite(DatacenterPreference.LOCAL_PREFERRED);
                 
             } catch (Exception e) {
                 logger.error("Error determining optimal write datacenter for key: {}", key, e);
-                return router.selectDatacenter(DatacenterPreference.LOCAL_PREFERRED);
+                return router.selectDatacenterForWrite(DatacenterPreference.LOCAL_PREFERRED);
             }
         });
     }
@@ -220,13 +213,13 @@ public class DataLocalityManager implements AutoCloseable {
                     return false;
                 }
                 
-                // Get TTL from source (simplified - returns seconds as long)
-                Long ttlSeconds = client.sync().ttl(key, DatacenterPreference.SPECIFIC_DATACENTER);
+                // Get TTL from source 
+                Duration ttl = client.sync().ttl(key, DatacenterPreference.SPECIFIC_DATACENTER);
                 
                 // Set data in target datacenter
                 client.sync().set(key, value, DatacenterPreference.SPECIFIC_DATACENTER);
-                if (ttlSeconds != null && ttlSeconds > 0) {
-                    client.sync().expire(key, Duration.ofSeconds(ttlSeconds), DatacenterPreference.SPECIFIC_DATACENTER);
+                if (ttl != null && !ttl.isNegative() && !ttl.isZero()) {
+                    client.sync().expire(key, ttl, DatacenterPreference.SPECIFIC_DATACENTER);
                 }
                 
                 // Update data placement tracking
@@ -370,7 +363,7 @@ public class DataLocalityManager implements AutoCloseable {
             0,    // errorCount
             0L,   // totalRequests
             0L,   // totalErrors
-            io.github.resilience4j.circuitbreaker.CircuitBreaker.State.CLOSED, // circuitBreakerState
+            CircuitBreakerState.CLOSED, // circuitBreakerState
             true  // available
         );
     }

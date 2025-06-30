@@ -80,7 +80,7 @@ public class TombstoneKeyManager implements AutoCloseable {
                 
                 // Optionally remove original key
                 if (removeOriginal) {
-                    client.sync().del(key, DatacenterPreference.LOCAL_PREFERRED);
+                    client.sync().delete(key, DatacenterPreference.LOCAL_PREFERRED);
                 }
                 
                 trackedKeys.add(key);
@@ -122,7 +122,7 @@ public class TombstoneKeyManager implements AutoCloseable {
                 client.sync().expire(invalidationKey, config.getInvalidationTtl(), DatacenterPreference.LOCAL_PREFERRED);
                 
                 // Remove original key from cache
-                client.sync().del(key, DatacenterPreference.LOCAL_PREFERRED);
+                client.sync().delete(key, DatacenterPreference.LOCAL_PREFERRED);
                 
                 trackedKeys.add(key);
                 logger.info("Invalidated key: {} across all datacenters, reason: {}", key, reason);
@@ -152,7 +152,7 @@ public class TombstoneKeyManager implements AutoCloseable {
                 String lockValue = owner + ":" + System.currentTimeMillis();
                 
                 // Use SETNX for atomic lock acquisition
-                Boolean result = client.sync().setnx(redisKey, lockValue);
+                Boolean result = client.sync().setIfNotExists(redisKey, lockValue);
                 
                 if (Boolean.TRUE.equals(result)) {
                     client.sync().expire(redisKey, ttl, DatacenterPreference.LOCAL_PREFERRED);
@@ -197,8 +197,8 @@ public class TombstoneKeyManager implements AutoCloseable {
                 boolean released = false;
                 
                 if (lockValue.equals(currentValue)) {
-                    Long delResult = client.sync().del(lock.getRedisKey(), DatacenterPreference.LOCAL_PREFERRED);
-                    released = delResult != null && delResult == 1;
+                    boolean delResult = client.sync().delete(lock.getRedisKey(), DatacenterPreference.LOCAL_PREFERRED);
+                    released = delResult;
                 }
                 if (released) {
                     logger.debug("Released distributed lock: {}", lock.getLockKey());

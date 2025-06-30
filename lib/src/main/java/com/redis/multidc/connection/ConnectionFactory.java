@@ -208,8 +208,11 @@ public class ConnectionFactory implements AutoCloseable {
             }
             
             if (config.getTruststore() != null) {
-                sslBuilder.truststore(config.getTruststore(), config.getTruststorePassword() != null ? 
-                    config.getTruststorePassword().toCharArray() : new char[0]);
+                if (config.getTruststorePassword() != null) {
+                    sslBuilder.truststore(config.getTruststore(), config.getTruststorePassword());
+                } else {
+                    sslBuilder.truststore(config.getTruststore(), "");
+                }
             }
             
             optionsBuilder.sslOptions(sslBuilder.build());
