@@ -27,6 +27,7 @@ public class DatacenterRouter {
     private final DatacenterConfiguration configuration;
     private final MetricsCollector metricsCollector;
     private final ConcurrentHashMap<String, DatacenterInfo> datacenterInfoMap;
+    private final FallbackRouter fallbackRouter;
     private volatile long lastRoutingRefresh = 0;
     
     public DatacenterRouter(DatacenterConfiguration configuration, MetricsCollector metricsCollector) {
@@ -36,6 +37,9 @@ public class DatacenterRouter {
         
         // Initialize datacenter info
         initializeDatacenterInfo();
+        
+        // Initialize fallback router
+        this.fallbackRouter = new FallbackRouter(configuration, this, metricsCollector);
     }
     
     private void initializeDatacenterInfo() {
@@ -55,16 +59,60 @@ public class DatacenterRouter {
     
     /**
      * Select the best datacenter for a read operation.
+     * Automatically applies fallback strategy if primary routing fails.
      */
     public Optional<String> selectDatacenterForRead(DatacenterPreference preference) {
-        return selectDatacenter(preference, true);
+        return selectDatacenterWithFallback(preference, true);
     }
     
     /**
      * Select the best datacenter for a write operation.
+     * Automatically applies fallback strategy if primary routing fails.
      */
     public Optional<String> selectDatacenterForWrite(DatacenterPreference preference) {
+        return selectDatacenterWithFallback(preference, false);
+    }
+    
+    /**
+     * Select the best datacenter for a read operation using primary routing only.
+     * Does not apply fallback strategy.
+     */
+    public Optional<String> selectDatacenterForReadPrimary(DatacenterPreference preference) {
+        return selectDatacenter(preference, true);
+    }
+    
+    /**
+     * Select the best datacenter for a write operation using primary routing only.
+     * Does not apply fallback strategy.
+     */
+    public Optional<String> selectDatacenterForWritePrimary(DatacenterPreference preference) {
         return selectDatacenter(preference, false);
+    }
+    
+    /**
+     * Select the best datacenter with fallback support for a read operation.
+     */
+    public Optional<String> selectDatacenterForReadWithFallback(DatacenterPreference preference) {
+        return fallbackRouter.selectDatacenterWithFallback(preference, true);
+    }
+    
+    /**
+     * Select the best datacenter with fallback support for a write operation.
+     */
+    public Optional<String> selectDatacenterForWriteWithFallback(DatacenterPreference preference) {
+        return fallbackRouter.selectDatacenterWithFallback(preference, false);
+    }
+    
+    private Optional<String> selectDatacenterWithFallback(DatacenterPreference preference, boolean isRead) {
+        // Try primary routing first
+        Optional<String> primaryResult = selectDatacenter(preference, isRead);
+        
+        if (primaryResult.isPresent()) {
+            return primaryResult;
+        }
+        
+        // Apply fallback strategy if primary routing fails
+        return fallbackRouter.selectDatacenterWithFallback(preference, isRead);
     }
     
     private Optional<String> selectDatacenter(DatacenterPreference preference, boolean isRead) {
@@ -221,5 +269,11 @@ public class DatacenterRouter {
     
     public Optional<DatacenterInfo> getDatacenterInfo(String datacenterId) {
         return Optional.ofNullable(datacenterInfoMap.get(datacenterId));
+    }
+    
+    public void shutdown() {
+        if (fallbackRouter != null) {
+            fallbackRouter.shutdown();
+        }
     }
 }

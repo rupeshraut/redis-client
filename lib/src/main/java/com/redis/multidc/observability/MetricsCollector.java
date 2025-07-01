@@ -142,6 +142,41 @@ public class MetricsCollector {
         return meterRegistry;
     }
     
+    public void recordRoutingSuccess(String routingType, Duration latency) {
+        Counter.builder("redis.multidc.routing.success")
+            .tag("type", routingType)
+            .description("Successful routing operations")
+            .register(meterRegistry)
+            .increment();
+            
+        Timer.builder("redis.multidc.routing.latency")
+            .tag("type", routingType)
+            .description("Routing operation latency")
+            .register(meterRegistry)
+            .record(latency);
+    }
+    
+    public void recordRoutingFailure(String routingType, Duration latency) {
+        Counter.builder("redis.multidc.routing.failure")
+            .tag("type", routingType)
+            .description("Failed routing operations")
+            .register(meterRegistry)
+            .increment();
+            
+        Timer.builder("redis.multidc.routing.latency")
+            .tag("type", routingType)
+            .description("Routing operation latency")
+            .register(meterRegistry)
+            .record(latency);
+    }
+    
+    public void recordQueuedOperationSuccess() {
+        Counter.builder("redis.multidc.queued.success")
+            .description("Successfully processed queued operations")
+            .register(meterRegistry)
+            .increment();
+    }
+    
     /**
      * Datacenter-specific metrics container.
      */

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Tag;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @Testcontainers
 @TestMethodOrder(MethodOrderer.DisplayName.class)
+@Tag("integration")
 class MultiDatacenterIntegrationTest {
 
     @Container

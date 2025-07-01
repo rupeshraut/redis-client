@@ -19,6 +19,7 @@ public class DatacenterConfiguration {
     private final int maxRetries;
     private final Duration retryDelay;
     private final ResilienceConfig resilienceConfig;
+    private final FallbackConfiguration fallbackConfiguration;
     private final Map<String, Object> additionalProperties;
     
     private DatacenterConfiguration(Builder builder) {
@@ -31,6 +32,7 @@ public class DatacenterConfiguration {
         this.maxRetries = builder.maxRetries;
         this.retryDelay = builder.retryDelay;
         this.resilienceConfig = builder.resilienceConfig;
+        this.fallbackConfiguration = builder.fallbackConfiguration;
         this.additionalProperties = Map.copyOf(builder.additionalProperties);
     }
     
@@ -70,6 +72,10 @@ public class DatacenterConfiguration {
         return resilienceConfig;
     }
     
+    public FallbackConfiguration getFallbackConfiguration() {
+        return fallbackConfiguration;
+    }
+    
     /**
      * @deprecated Use getResilienceConfig().isCircuitBreakerEnabled() instead.
      */
@@ -104,6 +110,7 @@ public class DatacenterConfiguration {
         private int maxRetries = 3;
         private Duration retryDelay = Duration.ofMillis(100);
         private ResilienceConfig resilienceConfig = ResilienceConfig.defaultConfig();
+        private FallbackConfiguration fallbackConfiguration = FallbackConfiguration.defaultConfig();
         private Map<String, Object> additionalProperties = Map.of();
         
         public Builder datacenters(List<DatacenterEndpoint> datacenters) {
@@ -148,6 +155,27 @@ public class DatacenterConfiguration {
         
         public Builder resilienceConfig(ResilienceConfig config) {
             this.resilienceConfig = config;
+            return this;
+        }
+        
+        public Builder fallbackConfiguration(FallbackConfiguration config) {
+            this.fallbackConfiguration = config;
+            return this;
+        }
+        
+        public Builder fallbackStrategy(FallbackStrategy strategy) {
+            this.fallbackConfiguration = FallbackConfiguration.builder()
+                    .strategy(strategy)
+                    .fallbackTimeout(this.fallbackConfiguration.getFallbackTimeout())
+                    .maxFallbackAttempts(this.fallbackConfiguration.getMaxFallbackAttempts())
+                    .fallbackRetryDelay(this.fallbackConfiguration.getFallbackRetryDelay())
+                    .fallbackDatacenterOrder(this.fallbackConfiguration.getFallbackDatacenterOrder())
+                    .enableStaleReads(this.fallbackConfiguration.isEnableStaleReads())
+                    .staleReadTolerance(this.fallbackConfiguration.getStaleReadTolerance())
+                    .queueSize(this.fallbackConfiguration.getQueueSize())
+                    .queueTimeout(this.fallbackConfiguration.getQueueTimeout())
+                    .customFallbackLogic(this.fallbackConfiguration.getCustomFallbackLogic())
+                    .build();
             return this;
         }
         

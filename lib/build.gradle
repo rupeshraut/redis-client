@@ -88,8 +88,63 @@ java {
 
 tasks.named('test') {
     // Use JUnit Platform for unit tests.
-    useJUnitPlatform()
+    useJUnitPlatform {
+        // Exclude integration tests by default
+        excludeTags 'integration'
+    }
     finalizedBy jacocoTestReport
+    
+    // Configure test logging
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showStandardStreams = false
+    }
+}
+
+// Task to run only integration tests
+task integrationTest(type: Test) {
+    description = 'Runs integration tests that require external dependencies (Redis containers, etc.)'
+    group = 'verification'
+    
+    useJUnitPlatform {
+        // Only run integration tests
+        includeTags 'integration'
+    }
+    
+    // Integration tests may take longer
+    timeout = Duration.ofMinutes(10)
+    
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showStandardStreams = true
+    }
+    
+    // Ensure integration tests run with more memory
+    minHeapSize = "512m"
+    maxHeapSize = "2g"
+}
+
+// Task to run all tests (unit + integration)
+task allTests(type: Test) {
+    description = 'Runs all tests including integration tests'
+    group = 'verification'
+    
+    useJUnitPlatform {
+        // Run all tests (no tag filtering)
+    }
+    
+    timeout = Duration.ofMinutes(15)
+    
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showStandardStreams = true
+    }
+    
+    minHeapSize = "512m"
+    maxHeapSize = "2g"
 }
 
 jacoco {
@@ -137,7 +192,8 @@ pitest {
         'com.redis.multidc.config.*',
         'com.redis.multidc.autoconfigure.*',
         'com.redis.multidc.example.*',
-        'com.redis.multidc.model.*'
+        'com.redis.multidc.model.*',
+        'com.redis.multidc.integration.*'  // Exclude integration tests from mutation testing
     ]
     
     // Additional JVM args if needed
@@ -148,6 +204,10 @@ pitest {
     
     // Configure test plugin
     testPlugin = 'junit5'
+    
+    // Exclude integration tests from mutation testing by using unit test task
+    testSourceSets = [sourceSets.test]
+    excludedTestClasses = ['*.integration.*']
 }
 
 // Make sure pitest runs after tests

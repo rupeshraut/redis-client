@@ -8,6 +8,7 @@ import com.redis.multidc.impl.DefaultMultiDatacenterRedisClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * This test showcases circuit breaker, retry, rate limiter, bulkhead, and time limiter
  * functionality with the multi-datacenter Redis client.
  */
+@Tag("integration")
 public class Resilience4jIntegrationTest {
     
     private static final Logger logger = LoggerFactory.getLogger(Resilience4jIntegrationTest.class);

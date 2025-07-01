@@ -11,6 +11,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.redis.multidc.config.DatacenterConfiguration;
 import com.redis.multidc.config.DatacenterEndpoint;
+import com.redis.multidc.config.FallbackConfiguration;
+import com.redis.multidc.config.FallbackStrategy;
 import com.redis.multidc.config.RoutingStrategy;
 import com.redis.multidc.model.DatacenterInfo;
 import com.redis.multidc.model.DatacenterPreference;
@@ -49,6 +51,12 @@ class DatacenterRouterTest {
         when(datacenterConfiguration.getDatacenters()).thenReturn(endpoints);
         when(datacenterConfiguration.getLocalDatacenterId()).thenReturn("us-east-1");
         lenient().when(datacenterConfiguration.getRoutingStrategy()).thenReturn(RoutingStrategy.LATENCY_BASED);
+        
+        // Mock fallback configuration
+        FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+            .strategy(FallbackStrategy.BEST_EFFORT)
+            .build();
+        when(datacenterConfiguration.getFallbackConfiguration()).thenReturn(fallbackConfig);
         
         datacenterRouter = new DatacenterRouter(datacenterConfiguration, metricsCollector);
     }

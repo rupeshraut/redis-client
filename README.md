@@ -18,6 +18,7 @@ A comprehensive Java Gradle-based Redis client library using Lettuce that suppor
 - **Circuit Breaker Pattern**: Built-in fault tolerance with configurable thresholds
 - **Health Monitoring**: Continuous datacenter health checks and automatic failover
 - **Retry Logic**: Configurable retry mechanisms with exponential backoff
+- **Production-Ready Fallback Strategies**: Comprehensive fallback behaviors for datacenter failures
 - **Production-Ready Connection Pooling**: Enterprise-grade connection pools per datacenter with comprehensive metrics
 - **Resilience4j Integration**: Complete fault tolerance patterns (circuit breaker, retry, rate limiter, bulkhead, time limiter)
 
@@ -142,14 +143,16 @@ try (MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.creat
 
 ### Advanced Resilience Configuration
 
-For production environments, you can configure comprehensive resilience patterns:
+For production environments, you can configure comprehensive resilience patterns with fallback strategies:
 
 ```java
 import com.redis.multidc.config.ResilienceConfig;
+import com.redis.multidc.config.FallbackConfiguration;
+import com.redis.multidc.config.FallbackStrategy;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.retry.RetryConfig;
 
-// Production-ready resilience configuration
+// Production-ready resilience configuration with fallback
 ResilienceConfig resilienceConfig = ResilienceConfig.builder()
     .circuitBreaker(CircuitBreakerConfig.custom()
         .failureRateThreshold(50.0f)                    // 50% failure rate threshold
@@ -164,10 +167,20 @@ ResilienceConfig resilienceConfig = ResilienceConfig.builder()
     .enableBasicPatterns()                              // Enable circuit breaker + retry
     .build();
 
+// Configure comprehensive fallback strategy
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.NEXT_AVAILABLE)         // Most common production strategy
+    .fallbackTimeout(Duration.ofSeconds(5))            // Max time for fallback attempts
+    .maxFallbackAttempts(3)                            // Max fallback attempts
+    .fallbackRetryDelay(Duration.ofMillis(100))        // Delay between fallback attempts
+    .fallbackDatacenterOrder(List.of("us-west-2", "eu-central-1")) // Specific fallback order
+    .build();
+
 // Use in configuration
 DatacenterConfiguration config = DatacenterConfiguration.builder()
     .datacenters(/* ... */)
     .resilienceConfig(resilienceConfig)                 // Apply resilience config
+    .fallbackConfiguration(fallbackConfig)             // Apply fallback config
     .build();
 ```
 
@@ -400,7 +413,158 @@ DatacenterEndpoint endpoint = DatacenterEndpoint.builder()
     .build();
 ```
 
-## Routing Strategies
+## Fallback Strategies
+
+The library provides comprehensive fallback strategies to handle datacenter failures and ensure high availability. These strategies define how the client behaves when the preferred datacenter is unavailable.
+
+### Available Fallback Strategies
+
+#### `NEXT_AVAILABLE` (Recommended for Production)
+Falls back to the next available datacenter based on priority or latency. Most common strategy for production environments.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.NEXT_AVAILABLE)
+    .fallbackTimeout(Duration.ofSeconds(5))
+    .maxFallbackAttempts(3)
+    .fallbackRetryDelay(Duration.ofMillis(100))
+    .build();
+```
+
+#### `TRY_ALL`
+Tries all datacenters in order of preference until one succeeds. More resilient but may introduce higher latency.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.TRY_ALL)
+    .fallbackTimeout(Duration.ofSeconds(10))
+    .maxFallbackAttempts(5)
+    .fallbackDatacenterOrder(List.of("us-west-2", "eu-central-1", "us-east-1"))
+    .build();
+```
+
+#### `LOCAL_ONLY`
+Fallback to local datacenter only, ensuring data locality in failure scenarios.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.LOCAL_ONLY)
+    .fallbackTimeout(Duration.ofSeconds(3))
+    .build();
+```
+
+#### `REMOTE_ONLY`
+Fallback to remote datacenters only, avoiding the local datacenter when issues are suspected.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.REMOTE_ONLY)
+    .fallbackTimeout(Duration.ofSeconds(5))
+    .build();
+```
+
+#### `BEST_EFFORT`
+Use cached/stale data from any available datacenter when preferred is unavailable. Prioritizes availability over consistency.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.BEST_EFFORT)
+    .enableStaleReads(true)
+    .staleReadTolerance(Duration.ofMinutes(5))
+    .fallbackTimeout(Duration.ofSeconds(2))
+    .build();
+```
+
+#### `QUEUE_AND_RETRY`
+Queue operations and retry when datacenters become available. Includes configurable timeout and queue size limits.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.QUEUE_AND_RETRY)
+    .queueSize(1000)
+    .queueTimeout(Duration.ofSeconds(5))
+    .fallbackTimeout(Duration.ofSeconds(30))
+    .maxFallbackAttempts(5)
+    .fallbackRetryDelay(Duration.ofSeconds(2))
+    .build();
+```
+
+#### `CUSTOM`
+Custom fallback strategy with pluggable logic.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.CUSTOM)
+    .customFallbackLogic(() -> {
+        // Custom logic: prefer EU datacenter during US business hours
+        LocalTime now = LocalTime.now();
+        if (now.getHour() >= 9 && now.getHour() <= 17) {
+            return "eu-central-1";
+        } else {
+            return "us-west-2";
+        }
+    })
+    .build();
+```
+
+#### `FAIL_FAST`
+No fallback - fail immediately if preferred datacenter is unavailable. Operations will fail with an exception.
+
+```java
+FallbackConfiguration fallbackConfig = FallbackConfiguration.builder()
+    .strategy(FallbackStrategy.FAIL_FAST)
+    .build();
+```
+
+### Fallback Configuration in Practice
+
+```java
+// Complete configuration with fallback strategy
+DatacenterConfiguration config = DatacenterConfiguration.builder()
+    .datacenters(List.of(
+        DatacenterEndpoint.builder()
+            .id("us-east-1")
+            .host("redis-us-east.example.com")
+            .port(6379)
+            .priority(1)
+            .build(),
+        DatacenterEndpoint.builder()
+            .id("us-west-2")
+            .host("redis-us-west.example.com")
+            .port(6379)
+            .priority(2)
+            .build()
+    ))
+    .localDatacenter("us-east-1")
+    .routingStrategy(RoutingStrategy.LATENCY_BASED)
+    .fallbackStrategy(FallbackStrategy.NEXT_AVAILABLE)  // Simple fallback configuration
+    .fallbackConfiguration(FallbackConfiguration.builder() // Or detailed configuration
+        .strategy(FallbackStrategy.TRY_ALL)
+        .fallbackTimeout(Duration.ofSeconds(10))
+        .maxFallbackAttempts(3)
+        .fallbackDatacenterOrder(List.of("us-west-2", "eu-central-1"))
+        .build())
+    .build();
+
+// Use the client - fallback is automatic
+try (MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.create(config)) {
+    // Operations automatically use fallback strategy when needed
+    client.sync().set("key", "value", DatacenterPreference.LOCAL_PREFERRED);
+    String value = client.sync().get("key", DatacenterPreference.LOCAL_PREFERRED);
+}
+```
+
+### Fallback Strategy Examples
+
+For comprehensive examples of all fallback strategies, see:
+**🔄 [Fallback Strategy Example](lib/src/main/java/com/redis/multidc/example/FallbackStrategyExample.java)**
+
+This example demonstrates:
+- Production-ready fallback configurations
+- Different fallback strategies for various scenarios  
+- Error handling and resilience patterns
+- Custom fallback logic implementation
+- Performance and availability trade-offs
 
 ### Available Strategies
 
@@ -1588,13 +1752,28 @@ DatacenterConfiguration prodConfig = DatacenterConfiguration.builder()
 To quickly explore the library's capabilities, check out our comprehensive examples:
 
 #### 🚀 **Start Here**: [Simple Usage Example](lib/src/main/java/com/redis/multidc/example/SimpleUsageExample.java)
+
 Basic working example demonstrating core functionality - perfect for getting started.
 
 #### 🏭 **Production Ready**: [Production Usage Example](lib/src/main/java/com/redis/multidc/example/ProductionUsageExample.java)
+
 Enterprise configuration with SSL/TLS, authentication, monitoring, and best practices.
 
 #### ⚡ **Performance**: [Reactive Streaming Example](lib/src/main/java/com/redis/multidc/example/ReactiveStreamingExample.java)
+
 High-performance reactive programming patterns with backpressure handling and error recovery.
+
+#### 📊 **Monitoring**: [Health Monitoring Example](lib/src/main/java/com/redis/multidc/example/HealthMonitoringExample.java)
+
+Comprehensive health monitoring, metrics collection, and real-time alerts.
+
+#### 💾 **Advanced Features**: [Data Locality & Tombstone Example](lib/src/main/java/com/redis/multidc/example/DataLocalityManagerExample.java)
+
+Advanced data management with locality optimization and tombstone key lifecycle.
+
+#### 🔄 **Fallback Strategies**: [Fallback Strategy Example](lib/src/main/java/com/redis/multidc/example/FallbackStrategyExample.java)
+
+**NEW** - Production-ready fallback strategies for handling datacenter failures and ensuring high availability.
 
 #### 📊 **Monitoring**: [Health Monitoring Example](lib/src/main/java/com/redis/multidc/example/HealthMonitoringExample.java)
 Real-time health monitoring, event subscription, and operational observability.
@@ -2370,6 +2549,7 @@ Each example is fully documented with inline comments explaining the patterns, b
 - Multi-datacenter configuration and routing
 - Synchronous, asynchronous, and reactive operations  
 - Comprehensive resilience patterns (Circuit Breaker, Retry, Rate Limiter, Bulkhead, Time Limiter)
+- **Production-ready fallback strategies** (NEW - 8 different strategies including NEXT_AVAILABLE, TRY_ALL, BEST_EFFORT, etc.)
 - Connection pooling with monitoring and metrics
 - Health monitoring and event subscription
 - Data locality management and tombstone key management
@@ -2377,7 +2557,6 @@ Each example is fully documented with inline comments explaining the patterns, b
 - Comprehensive observability with Micrometer metrics
 
 ### 🚧 **Features in Development**
-- Advanced fallback strategies (currently uses routing strategy for failover)
 - Custom authentication modes beyond password/no-auth
 - Advanced SSL configuration options
 - Distributed tracing integration
