@@ -15,6 +15,7 @@ A comprehensive Java Gradle-based Redis client library using Lettuce that suppor
 - **Reactive Operations**: Reactive Streams (Project Reactor) for high-throughput scenarios
 
 ### 🛡️ Enterprise-Grade Reliability
+- **Automatic Reconnection**: Transparent reconnection with multi-layer resilience (Lettuce client, connection pools, and datacenter routing)
 - **Circuit Breaker Pattern**: Built-in fault tolerance with configurable thresholds
 - **Health Monitoring**: Continuous datacenter health checks and automatic failover
 - **Retry Logic**: Configurable retry mechanisms with exponential backoff
@@ -1436,841 +1437,383 @@ try {
 }
 ```
 
-### Testing Strategies
+## Automatic Reconnection
 
-Comprehensive testing approaches for multi-datacenter Redis operations.
+The Redis Multi-Datacenter Client Library provides **comprehensive automatic reconnection capabilities** built on top of Lettuce's robust reconnection features, ensuring your application maintains connectivity even during network disruptions or Redis server restarts.
+
+### 🔄 How Automatic Reconnection Works
+
+#### Multi-Layer Reconnection Strategy
+
+The library implements a sophisticated multi-layer approach to handle connection failures:
+
+**Layer 1: Lettuce Client Level**
+- Automatic reconnection when connections are lost
+- Connection validation with ping checks
+- Command queueing during reconnection
+- Graceful protocol failure handling
+
+**Layer 2: Connection Pool Level**  
+- Continuous validation of pooled connections
+- Automatic replacement of failed connections
+- Background maintenance and cleanup
+- Health metrics tracking
+
+**Layer 3: Datacenter Router Level**
+- Intelligent failover to healthy datacenters
+- Circuit breaker protection
+- Real-time health monitoring
+- Smart traffic routing
+
+### ⚙️ Configuration
+
+#### Basic Reconnection Settings
 
 ```java
-@ExtendWith(MockitoExtension.class)
-class MultiDatacenterRedisClientTest {
-    
-    @Mock
-    private DatacenterRouter router;
-    
-    @Mock
-    private MetricsCollector metricsCollector;
-    
-    private MultiDatacenterRedisClient client;
-    
-    @BeforeEach
-    void setUp() {
-        // Use embedded Redis for testing
-        RedisServer redisServer = RedisServer.builder()
-            .port(6370)
-            .setting("maxmemory 128M")
-            .build();
-        redisServer.start();
+// Auto-reconnect is enabled by default
+ConnectionFactoryConfig config = ConnectionFactoryConfig.builder()
+    .autoReconnect(true)                                    // ✅ Enable automatic reconnection
+    .connectionTimeout(Duration.ofSeconds(10))              // Initial connection timeout
+    .commandTimeout(Duration.ofSeconds(5))                  // Command execution timeout
+    .validationTimeout(Duration.ofSeconds(3))               // Connection validation timeout
+    .pingBeforeActivateConnection(true)                     // Validate before use
+    .cancelCommandsOnReconnectFailure(false)                // Commands survive reconnection
+    .build();
+```
+
+#### Advanced Resilience Configuration
+
+```java
+// Comprehensive reconnection with fallback strategies
+MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.create()
+    .datacenterConfiguration(DatacenterConfiguration.builder()
+        .connectionTimeout(Duration.ofSeconds(10))
+        .requestTimeout(Duration.ofSeconds(15))
+        .healthCheckInterval(Duration.ofSeconds(30))        // Health check frequency
         
-        DatacenterConfiguration testConfig = DatacenterConfiguration.builder()
-            .datacenters(List.of(
-                DatacenterEndpoint.builder()
-                    .id("test-dc")
-                    .host("localhost")
-                    .port(6370)
-                    .build()
-            ))
-            .build();
-            
-        client = MultiDatacenterRedisClientBuilder.create(testConfig);
-    }
-    
-    @Test
-    void testBasicOperations() {
-        // Test basic set/get
-        client.sync().set("test:key", "test:value");
-        String value = client.sync().get("test:key");
-        assertThat(value).isEqualTo("test:value");
-    }
-    
-    @Test
-    void testDatacenterFailover() {
-        // Simulate datacenter failure
-        when(router.selectDatacenterForRead(any()))
-            .thenReturn(Optional.empty())
-            .thenReturn(Optional.of("backup-dc"));
-            
-        // Test failover behavior
-        assertThatThrownBy(() -> client.sync().get("test:key"))
-            .isInstanceOf(RuntimeException.class)
-            .hasMessageContaining("No available datacenter");
-    }
-    
-    @Test
-    void testAsyncOperations() {
-        CompletableFuture<Void> setFuture = client.async().set("async:key", "async:value");
-        CompletableFuture<String> getFuture = setFuture
-            .thenCompose(v -> client.async().get("async:key"));
-            
-        String result = getFuture.join();
-        assertThat(result).isEqualTo("async:value");
-    }
-}
-```
-
-## Architecture
-
-### Core Components
-
-The library is built with a modular architecture designed for enterprise-scale multi-datacenter deployments.
-
-#### Client Layer
-
-- **`MultiDatacenterRedisClient`**: Main client interface providing sync, async, and reactive APIs
-- **`SyncOperations`**: Synchronous blocking operations interface
-- **`AsyncOperations`**: Asynchronous CompletableFuture-based operations interface  
-- **`ReactiveOperations`**: Reactive Streams operations using Project Reactor
-
-#### Routing and Load Balancing
-
-- **`DatacenterRouter`**: Intelligent routing logic with pluggable strategies
-- **`RoutingStrategy`**: Configurable routing algorithms (latency-based, priority-based, etc.)
-- **`DatacenterSelector`**: Datacenter selection based on preferences and availability
-- **`LoadBalancer`**: Traffic distribution across available datacenters
-
-#### Health and Monitoring
-
-- **`DatacenterHealthMonitor`**: Continuous health monitoring with configurable intervals
-- **`CircuitBreaker`**: Fault tolerance with automatic failure detection and recovery
-- **`MetricsCollector`**: Comprehensive observability using Micrometer
-- **`HealthEventPublisher`**: Real-time health change notifications
-
-#### Data Management
-
-- **`TombstoneKeyManager`**: Advanced key lifecycle management for soft deletion and cache invalidation
-- **`ReplicationManager`**: CRDB-aware conflict resolution and replication handling
-- **`DataLocalityManager`**: Intelligent data placement and access optimization
-
-#### Network and Connection Layer
-
-- **`ConnectionPool`**: Per-datacenter connection pooling with lifecycle management
-- **`ConnectionFactory`**: Lettuce connection creation and configuration
-- **`SSLContextProvider`**: Security configuration for encrypted connections
-
-### Architecture Diagram
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                   MultiDatacenterRedisClient                   │
-├─────────────────┬─────────────────┬─────────────────────────────┤
-│   SyncOps       │    AsyncOps     │      ReactiveOps            │
-│   Interface     │    Interface    │      Interface              │
-└─────────────────┴─────────────────┴─────────────────────────────┘
-                           │
-┌─────────────────────────────────────────────────────────────────┐
-│                   DatacenterRouter                             │
-├─────────────────┬─────────────────┬─────────────────────────────┤
-│ RoutingStrategy │ DatacenterSel   │    LoadBalancer             │
-│ • Latency-based │ • Preference    │    • Weighted RR            │
-│ • Priority-based│ • Availability  │    • Random                 │
-│ • Custom        │ • Health        │    • Custom                 │
-└─────────────────┴─────────────────┴─────────────────────────────┘
-                           │
-┌─────────────────────────────────────────────────────────────────┐
-│                 Health & Monitoring Layer                      │
-├─────────────────┬─────────────────┬─────────────────────────────┤
-│ HealthMonitor   │ CircuitBreaker  │    MetricsCollector         │
-│ • Periodic      │ • Failure Det   │    • Request Metrics        │
-│ • On-demand     │ • Auto Recovery │    • Connection Metrics     │
-│ • Event-driven  │ • Configurable  │    • Health Metrics         │
-└─────────────────┴─────────────────┴─────────────────────────────┘
-                           │
-┌─────────────────────────────────────────────────────────────────┐
-│                   Connection Layer                             │
-├─────────────────┬─────────────────┬─────────────────────────────┤
-│ ConnectionPool  │ Lettuce Client  │    SSL/TLS Provider         │
-│ • Per-DC Pool   │ • Async/Sync    │    • Cert Management        │
-│ • Lifecycle Mgmt│ • Reactive      │    • Protocol Config        │
-│ • Monitoring    │ • Pipeline      │    • Hostname Verify        │
-└─────────────────┴─────────────────┴─────────────────────────────┘
-                           │
-┌─────────────────────────────────────────────────────────────────┐
-│                     Redis Datacenters                          │
-├─────────────────┬─────────────────┬─────────────────────────────┤
-│   US-East-1     │    US-West-2    │      EU-Central-1           │
-│   Primary       │    Secondary    │      DR Site                │
-│   Read/Write    │    Read/Write   │      Read Only              │
-└─────────────────┴─────────────────┴─────────────────────────────┘
-```
-
-### Data Flow
-
-#### Read Operations Flow
-
-1. **Request Received**: Client receives read request with optional DatacenterPreference
-2. **Routing Decision**: DatacenterRouter selects optimal datacenter based on:
-   - Preference (LOCAL_PREFERRED, ANY_AVAILABLE, etc.)
-   - Datacenter health status
-   - Current latency metrics
-   - Circuit breaker state
-3. **Connection Acquisition**: ConnectionPool provides connection from selected datacenter
-4. **Operation Execution**: Lettuce executes Redis command asynchronously
-5. **Metrics Collection**: Request duration, success/failure recorded
-6. **Result Processing**: Response transformed and returned to client
-
-#### Write Operations Flow
-
-1. **Request Received**: Client receives write request
-2. **Write Routing**: Router selects write datacenter (usually local or primary)
-3. **Circuit Breaker Check**: Verify datacenter is healthy and accepting requests
-4. **Operation Execution**: Execute write operation with timeout
-5. **Replication Handling**: Handle any CRDB replication requirements
-6. **Tombstone Management**: Process any tombstone key requirements
-7. **Metrics & Monitoring**: Record operation metrics and health data
-
-### Thread Safety
-
-All client operations are thread-safe and designed for concurrent access:
-
-- **Connection Pools**: Thread-safe per-datacenter connection management
-- **Routing Logic**: Immutable routing decisions with concurrent health updates
-- **Metrics Collection**: Lock-free metrics aggregation using Micrometer
-- **Health Monitoring**: Asynchronous health checks with thread-safe state updates
-
-### Memory Management
-
-Efficient memory usage through:
-
-- **Connection Pooling**: Reuse connections to minimize allocation overhead
-- **Lazy Initialization**: Components initialized only when needed
-- **Resource Cleanup**: Automatic cleanup of connections and resources
-- **Bounded Queues**: Prevent memory leaks with bounded internal queues
-
-## Configuration Reference
-
-### Complete Configuration Example
-
-```java
-DatacenterConfiguration config = DatacenterConfiguration.builder()
-    // Datacenter endpoints
-    .datacenters(List.of(
-        DatacenterEndpoint.builder()
-            .id("us-east-1")
-            .region("us-east")
-            .host("redis-1.us-east.example.com")
-            .port(6379)
-            .ssl(true)
-            .username("redis-user")
-            .password("secure-password")
-            .database(0)
-            .priority(1)
-            .weight(1.0)
-            .readOnly(false)
-            .connectionPoolSize(20)
-            .connectionTimeout(Duration.ofSeconds(5))
-            .idleTimeout(Duration.ofMinutes(10))
-            .build(),
-        DatacenterEndpoint.builder()
-            .id("us-west-2")
-            .region("us-west")
-            .host("redis-1.us-west.example.com")
-            .port(6379)
-            .ssl(true)
-            .priority(2)
-            .weight(0.8)
-            .build()
-    ))
-    
-    // Global configuration
-    .localDatacenter("us-east-1")
-    .routingStrategy(RoutingStrategy.LATENCY_BASED)
-    
-    // Timeouts and retries
-    .connectionTimeout(Duration.ofSeconds(5))
-    .requestTimeout(Duration.ofSeconds(10))
-    .maxRetries(3)
-    .retryDelay(Duration.ofMillis(100))
-    
-    // Health monitoring
-    .healthCheckInterval(Duration.ofSeconds(30))
-    
-    // Modern resilience patterns (recommended)
-    .resilienceConfig(ResilienceConfig.builder()
-        .circuitBreaker(CircuitBreakerConfig.custom()
-            .failureRateThreshold(50.0f)
-            .waitDurationInOpenState(Duration.ofSeconds(30))
-            .slidingWindowSize(10)
-            .minimumNumberOfCalls(5)
-            .build())
-        .retry(RetryConfig.custom()
-            .maxAttempts(3)
-            .waitDuration(Duration.ofMillis(100))
-            .build())
-        .enableBasicPatterns()
-        .build())
-    
-    // Observability
-    .enableDetailedMetrics(true)
-    .metricsRegistry(meterRegistry)
-    .enableDistributedTracing(true)
-    
-    // Advanced features
-    .enableTombstoneKeys(true)
-    .tombstoneKeyTtl(Duration.ofMinutes(10))
-    .enableDataLocalityOptimization(true)
-    .compressionEnabled(true)
-    .build();
-```
-
-### Environment-Specific Configurations
-
-#### Development Configuration
-
-```java
-DatacenterConfiguration devConfig = DatacenterConfiguration.builder()
-    .datacenters(List.of(
-        DatacenterEndpoint.builder()
-            .id("local")
-            .host("localhost")
-            .port(6379)
-            .build()
-    ))
-    .localDatacenter("local")
-    .routingStrategy(RoutingStrategy.LOCAL_ONLY)
-    .requestTimeout(Duration.ofSeconds(30))
-    .resilienceConfig(ResilienceConfig.relaxedConfig()) // Relaxed for dev/test
-    .build();
-```
-
-#### Production Configuration
-
-```java
-DatacenterConfiguration prodConfig = DatacenterConfiguration.builder()
-    .datacenters(productionEndpoints)
-    .routingStrategy(RoutingStrategy.LATENCY_BASED)
-    .connectionTimeout(Duration.ofSeconds(2))
-    .requestTimeout(Duration.ofSeconds(5))
-    .maxRetries(3)
-    .resilienceConfig(ResilienceConfig.highThroughputConfig()) // Production-optimized
-    .healthCheckInterval(Duration.ofSeconds(15))
-    .build();
-```
-
-## Examples and Demonstrations
-
-### Getting Started with Examples
-
-To quickly explore the library's capabilities, check out our comprehensive examples:
-
-#### 🚀 **Start Here**: [Simple Usage Example](lib/src/main/java/com/redis/multidc/example/SimpleUsageExample.java)
-
-Basic working example demonstrating core functionality - perfect for getting started.
-
-#### 🏭 **Production Ready**: [Production Usage Example](lib/src/main/java/com/redis/multidc/example/ProductionUsageExample.java)
-
-Enterprise configuration with SSL/TLS, authentication, monitoring, and best practices.
-
-#### ⚡ **Performance**: [Reactive Streaming Example](lib/src/main/java/com/redis/multidc/example/ReactiveStreamingExample.java)
-
-High-performance reactive programming patterns with backpressure handling and error recovery.
-
-#### 📊 **Monitoring**: [Health Monitoring Example](lib/src/main/java/com/redis/multidc/example/HealthMonitoringExample.java)
-
-Comprehensive health monitoring, metrics collection, and real-time alerts.
-
-#### 💾 **Advanced Features**: [Data Locality & Tombstone Example](lib/src/main/java/com/redis/multidc/example/DataLocalityManagerExample.java)
-
-Advanced data management with locality optimization and tombstone key lifecycle.
-
-#### 🔄 **Fallback Strategies**: [Fallback Strategy Example](lib/src/main/java/com/redis/multidc/example/FallbackStrategyExample.java)
-
-**NEW** - Production-ready fallback strategies for handling datacenter failures and ensuring high availability.
-
-#### 📊 **Monitoring**: [Health Monitoring Example](lib/src/main/java/com/redis/multidc/example/HealthMonitoringExample.java)
-Real-time health monitoring, event subscription, and operational observability.
-
-#### 💾 **Advanced Features**: [Data Locality & Tombstone Example](lib/src/main/java/com/redis/multidc/example/DataLocalityManagerExample.java)
-Advanced data management patterns including locality optimization and tombstone key management.
-
-Each example includes detailed documentation and can be run independently to demonstrate specific functionality.
-
-### Production Connection Pool Demo
-
-The library includes a comprehensive production demo showcasing enterprise-grade connection pooling:
-
-```java
-// Run the production connection pool demonstration
-java -cp "lib/build/classes/java/main:$(dependencies)" \
-    com.redis.multidc.demo.ProductionConnectionPoolDemo
-```
-
-This demo demonstrates:
-
-- **Production-Grade Configuration**: Enterprise resilience patterns and connection pooling
-- **High-Performance Pool Setup**: Optimized configurations for different scenarios
-- **Load Testing**: Simulated high-load operations with metrics monitoring
-- **Metrics Monitoring**: Real-time pool utilization and performance tracking
-- **Health Monitoring**: Datacenter health checks and failover scenarios
-
-Key features showcased:
-
-```java
-// Production resilience configuration
-ResilienceConfig resilienceConfig = ResilienceConfig.builder()
-    .enableAllPatterns()
-    .circuitBreakerConfig(30.0f, Duration.ofSeconds(60), 100, 10)
-    .retryConfig(5, Duration.ofMillis(200))
-    .rateLimiterConfig(2000, Duration.ofSeconds(1), Duration.ofMillis(50))
-    .bulkheadConfig(50, Duration.ofMillis(100))
-    .timeLimiterConfig(Duration.ofSeconds(10), true)
-    .build();
-
-// High-performance connection pools
-ConnectionPoolConfig primaryPoolConfig = ConnectionPoolConfig.builder()
-    .lowLatency()
-    .maxPoolSize(100)
-    .minPoolSize(20)
-    .acquisitionTimeout(Duration.ofSeconds(2))
-    .validateOnAcquire(true)
-    .build();
-
-// Load testing with metrics
-ExecutorService executor = Executors.newFixedThreadPool(50);
-for (int i = 0; i < 10000; i++) {
-    executor.submit(() -> {
-        client.sync().set("load_test_" + UUID.randomUUID(), "value", 
-            DatacenterPreference.LOCAL_PREFERRED);
-    });
-}
-
-// Real-time metrics monitoring
-ConnectionPoolMetrics metrics = client.getConnectionPoolMetrics("primary");
-System.out.printf("Pool Utilization: %.1f%%, Efficiency: %.3f%n",
-    metrics.getUtilizationPercentage(), metrics.getEfficiencyRatio());
-```
-
-### Resilience Demo
-
-Demonstrates connection pooling with comprehensive resilience patterns:
-
-```java
-// Run the resilience demonstration
-java -cp "lib/build/classes/java/main:$(dependencies)" \
-    com.redis.multidc.demo.ResilienceDemo
-```
-
-Features demonstrated:
-
-- **Circuit Breaker Integration**: Automatic failure detection and recovery
-- **Retry Mechanisms**: Configurable retry logic with exponential backoff
-- **Rate Limiting**: Traffic shaping and overload protection
-- **Bulkhead Isolation**: Resource isolation between operations
-- **Time Limiting**: Operation timeout handling
-- **Connection Pool Resilience**: Pool behavior under failure scenarios
-
-### Basic Usage Examples
-
-#### Simple Connection Pool Setup
-
-```java
-// Basic connection pool configuration
-DatacenterConfiguration config = DatacenterConfiguration.builder()
-    .datacenters(List.of(
-        DatacenterEndpoint.builder()
-            .id("primary")
+        // Connection pool settings
+        .addDatacenter(DatacenterEndpoint.builder()
+            .id("primary-dc")
             .host("redis.primary.example.com")
             .port(6379)
-            .connectionPoolSize(20)
-            .build(),
-        DatacenterEndpoint.builder()
-            .id("secondary")
-            .host("redis.secondary.example.com")
-            .port(6379)
-            .connectionPoolSize(15)
-            .build()
-    ))
-    .localDatacenter("primary")
-    .routingStrategy(RoutingStrategy.LATENCY_BASED)
-    .build();
-
-try (MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.create(config)) {
-    // Use client with automatic connection pooling
-    client.sync().set("user:123", "John Doe");
-    String value = client.sync().get("user:123");
-    
-    // Monitor pool health
-    ConnectionPoolMetrics metrics = client.getConnectionPoolMetrics("primary");
-    System.out.println("Pool utilization: " + metrics.getUtilizationPercentage() + "%");
-}
-```
-
-#### High-Performance Async Operations
-
-```java
-// High-throughput async operations using connection pools
-List<CompletableFuture<Void>> futures = new ArrayList<>();
-
-for (int i = 0; i < 10000; i++) {
-    String key = "async_key_" + i;
-    String value = "value_" + i;
-    
-    CompletableFuture<Void> future = client.async()
-        .set(key, value, DatacenterPreference.LOCAL_PREFERRED)
-        .thenCompose(v -> client.async().expire(key, Duration.ofMinutes(30)))
-        .exceptionally(throwable -> {
-            logger.error("Failed to set key: " + key, throwable);
-            return null;
-        });
-    
-    futures.add(future);
-}
-
-// Wait for all operations to complete
-CompletableFuture<Void> allOperations = CompletableFuture.allOf(
-    futures.toArray(new CompletableFuture[0]));
-
-allOperations.thenRun(() -> {
-    // Log final metrics
-    AggregatedPoolMetrics aggregated = client.getAggregatedPoolMetrics();
-    System.out.printf("Completed 10,000 operations. Total active connections: %d%n",
-        aggregated.getTotalActiveConnections());
-});
-```
-
-#### Reactive Streaming with Connection Pools
-
-```java
-// Reactive operations leveraging connection pools
-Flux<String> dataStream = client.reactive()
-    .scan("user:*")
-    .take(10000)
-    .flatMap(key -> client.reactive().get(key), 20)  // Parallel with connection pool
-    .filter(Objects::nonNull)
-    .buffer(100)
-    .flatMap(batch -> processBatchReactively(batch), 5)
-    .doOnNext(result -> logger.info("Processed batch: {}", result))
-    .doOnError(error -> logger.error("Stream processing failed", error))
-    .onErrorContinue((error, item) -> {
-        logger.warn("Failed to process item, continuing stream", error);
-    });
-
-// Subscribe with backpressure handling
-dataStream.subscribe(
-    result -> updateMetrics(result),
-    error -> alertingService.sendAlert("Stream failed", error),
-    () -> logger.info("Stream processing completed")
-);
-```
-
-#### Connection Pool Monitoring and Alerting
-
-```java
-// Set up comprehensive pool monitoring
-public class PoolMonitoringService {
-    private final MultiDatacenterRedisClient client;
-    private final MeterRegistry meterRegistry;
-    
-    public void startMonitoring() {
-        // Monitor pool utilization
-        Gauge.builder("redis.pool.utilization")
-            .description("Connection pool utilization percentage")
-            .register(meterRegistry, this, this::getAveragePoolUtilization);
+            .connectionPoolSize(20)                         // Pool size
+            .minPoolSize(5)                                 // Minimum connections
+            .acquisitionTimeout(Duration.ofSeconds(2))      // Pool acquisition timeout
+            .idleTimeout(Duration.ofMinutes(10))            // Keep connections alive
+            .maxConnectionAge(Duration.ofHours(1))          // Periodic connection rotation
+            .validateOnAcquire(true)                        // Validate before use
+            .build())
         
-        // Monitor acquisition timeouts
-        client.subscribeToPoolEvents((datacenterId, event, details) -> {
-            if (event == PoolEvent.ACQUISITION_TIMEOUT) {
-                Counter.builder("redis.pool.timeouts")
-                    .tag("datacenter", datacenterId)
-                    .register(meterRegistry)
-                    .increment();
-                
-                // Alert if timeouts exceed threshold
-                if (getTimeoutRate(datacenterId) > 0.05) { // 5% timeout rate
-                    alertingService.sendAlert(
-                        "High connection pool timeout rate for " + datacenterId,
-                        AlertLevel.WARNING
-                    );
-                }
-            }
-        });
+        // Fallback strategies for connection failures
+        .fallbackConfiguration(FallbackConfiguration.builder()
+            .strategy(FallbackStrategy.NEXT_AVAILABLE)      // Auto-fallback to healthy DC
+            .maxRetries(3)
+            .retryDelay(Duration.ofMillis(200))
+            .queueSize(1000)                                // Queue operations during outages
+            .build())
         
-        // Periodic health checks
-        Schedulers.newSingle("pool-monitor").schedulePeriodically(() -> {
-            Map<String, ConnectionPoolMetrics> allMetrics = client.getAllConnectionPoolMetrics();
-            for (Map.Entry<String, ConnectionPoolMetrics> entry : allMetrics.entrySet()) {
-                String datacenterId = entry.getKey();
-                ConnectionPoolMetrics metrics = entry.getValue();
-                
-                // Check pool health
-                if (metrics.getUtilizationPercentage() > 90) {
-                    logger.warn("Pool utilization high for {}: {}%", 
-                        datacenterId, metrics.getUtilizationPercentage());
-                }
-                
-                if (metrics.getEfficiencyRatio() < 0.95) {
-                    logger.warn("Pool efficiency low for {}: {}", 
-                        datacenterId, metrics.getEfficiencyRatio());
-                }
-            }
-        }, 0, 30, TimeUnit.SECONDS);
-    }
-    
-    private double getAveragePoolUtilization() {
-        return client.getAggregatedPoolMetrics().getOverallUtilization();
-    }
-}
-```
-
-#### Production Deployment Example
-
-```java
-// Production-ready configuration with full observability
-@Configuration
-@EnableConfigurationProperties(RedisMultiDcProperties.class)
-public class RedisMultiDcConfiguration {
-    
-    @Bean
-    public MultiDatacenterRedisClient redisClient(
-            RedisMultiDcProperties properties,
-            MeterRegistry meterRegistry) {
-        
-        List<DatacenterEndpoint> endpoints = properties.getDatacenters().stream()
-            .map(dc -> DatacenterEndpoint.builder()
-                .id(dc.getId())
-                .region(dc.getRegion())
-                .host(dc.getHost())
-                .port(dc.getPort())
-                .ssl(dc.isSsl())
-                .password(dc.getPassword())
-                .poolConfig(ConnectionPoolConfig.builder()
-                    .maxPoolSize(dc.getPoolSize())
-                    .minPoolSize(dc.getMinPoolSize())
-                    .acquisitionTimeout(Duration.ofSeconds(dc.getAcquisitionTimeoutSeconds()))
-                    .idleTimeout(Duration.ofMinutes(dc.getIdleTimeoutMinutes()))
-                    .validateOnAcquire(true)
-                    .build())
-                .resilienceConfig(ResilienceConfig.builder()
-                    .enableAllPatterns()
-                    .circuitBreakerConfig(
-                        dc.getCircuitBreakerFailureThreshold(),
-                        Duration.ofSeconds(dc.getCircuitBreakerWaitDurationSeconds()),
-                        dc.getCircuitBreakerSlidingWindowSize(),
-                        dc.getCircuitBreakerMinimumCalls()
-                    )
-                    .retryConfig(
-                        dc.getMaxRetries(),
-                        Duration.ofMillis(dc.getRetryDelayMs())
-                    )
-                    .build())
+        // Circuit breaker and resilience patterns
+        .resilienceConfig(ResilienceConfig.builder()
+            .circuitBreaker(CircuitBreakerConfig.custom()
+                .failureRateThreshold(30.0f)               // 30% failure rate triggers circuit
+                .waitDurationInOpenState(Duration.ofSeconds(60))  // Recovery time
+                .slidingWindowSize(10)
+                .minimumNumberOfCalls(5)
                 .build())
-            .collect(Collectors.toList());
-        
-        DatacenterConfiguration config = DatacenterConfiguration.builder()
-            .datacenters(endpoints)
-            .localDatacenter(properties.getLocalDatacenter())
-            .routingStrategy(properties.getRoutingStrategy())
-            .healthCheckInterval(Duration.ofSeconds(properties.getHealthCheckIntervalSeconds()))
-            .metricsRegistry(meterRegistry)
-            .enableDetailedMetrics(true)
-            .build();
-        
-        MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.create(config);
-        
-        // Set up monitoring
-        setupPoolMonitoring(client, meterRegistry);
-        
-        return client;
-    }
+            .retry(RetryConfig.custom()
+                .maxAttempts(3)
+                .waitDuration(Duration.ofMillis(100))
+                .retryOnException(throwable -> 
+                    throwable instanceof RedisConnectionException)
+                .build())
+            .build())
+    .build();
+```
+
+### 🔍 Connection Pool Behavior
+
+#### Automatic Connection Management
+
+The connection pool automatically handles the entire connection lifecycle:
+
+```java
+public class DefaultConnectionPool {
     
-    private void setupPoolMonitoring(MultiDatacenterRedisClient client, MeterRegistry registry) {
-        // Register custom metrics
-        Gauge.builder("redis.multidc.pools.total")
-            .description("Total number of connection pools")
-            .register(registry, client, c -> c.getAllConnectionPoolMetrics().size());
-        
-        Gauge.builder("redis.multidc.connections.total.active")
-            .description("Total active connections across all pools")
-            .register(registry, client, c -> c.getAggregatedPoolMetrics().getTotalActiveConnections());
-    }
-}
-```
-
-## Troubleshooting
-
-### Common Issues
-
-#### Connection Pool Exhaustion
-
-**Problem**: Applications experiencing connection acquisition timeouts
-
-**Symptoms**:
-```
-ConnectionPoolException: Failed to acquire connection within timeout
-Pool utilization consistently > 95%
-High number of acquisition timeouts in metrics
-```
-
-**Solution**:
-
-```java
-// Increase pool size
-DatacenterEndpoint endpoint = DatacenterEndpoint.builder()
-    .connectionPoolSize(50)  // Increase from default
-    .minPoolSize(15)         // Ensure minimum connections
-    .acquisitionTimeout(Duration.ofSeconds(5))  // Increase timeout if needed
-    .build();
-
-// Monitor pool metrics to right-size
-ConnectionPoolMetrics metrics = client.getConnectionPoolMetrics("datacenter-id");
-if (metrics.getUtilizationPercentage() > 90) {
-    // Consider increasing pool size
-    logger.warn("Pool utilization high: {}%", metrics.getUtilizationPercentage());
-}
-
-// Check for connection leaks
-long createdCount = metrics.getTotalConnectionsCreated();
-long destroyedCount = metrics.getTotalConnectionsDestroyed();
-if (createdCount - destroyedCount > metrics.getMaxPoolSize() * 2) {
-    logger.error("Possible connection leak detected");
-}
-```
-
-#### Connection Timeouts
-
-**Problem**: Operations timing out frequently
-
-**Solution**:
-
-```java
-// Increase timeouts
-DatacenterConfiguration config = DatacenterConfiguration.builder()
-    .connectionTimeout(Duration.ofSeconds(10))
-    .requestTimeout(Duration.ofSeconds(15))
-    .build();
-
-// Check network connectivity
-String pong = client.sync().ping("problematic-datacenter");
-```
-
-#### Circuit Breaker Tripping
-
-**Problem**: Circuit breaker frequently opening
-
-**Solution**:
-
-```java
-// Adjust circuit breaker thresholds
-CircuitBreakerConfig cbConfig = CircuitBreakerConfig.builder()
-    .failureThreshold(10)          // Increase threshold
-    .recoveryTimeout(Duration.ofMinutes(2))  // Longer recovery time
-    .build();
-
-// Monitor circuit breaker state
-client.subscribeToHealthChanges((datacenter, healthy) -> {
-    if (!healthy) {
-        logger.warn("Circuit breaker opened for datacenter: {}", datacenter.getId());
-    }
-});
-```
-
-#### Memory Leaks
-
-**Problem**: Application memory usage growing over time
-
-**Solution**:
-
-```java
-// Ensure proper client cleanup
-try (MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.create(config)) {
-    // Use client
-} // Automatic cleanup
-
-// Monitor connection pools
-long activeConnections = client.getMetricsCollector()
-    .getActiveConnectionCount("datacenter-id");
-```
-
-#### Connection Pool Performance Issues
-
-**Problem**: Slow connection acquisition or poor pool performance
-
-**Symptoms**:
-```
-High average acquisition times (> 100ms)
-Frequent pool validation failures
-Low pool efficiency ratio (< 0.95)
-```
-
-**Solution**:
-
-```java
-// Optimize pool configuration
-ConnectionPoolConfig optimizedConfig = ConnectionPoolConfig.builder()
-    .lowLatency()                           // Use low-latency preset
-    .maxPoolSize(30)                        // Right-size for workload
-    .minPoolSize(10)                        // Pre-warm connections
-    .acquisitionTimeout(Duration.ofSeconds(1))  // Fast acquisition
-    .validateOnAcquire(false)               // Disable if not needed
-    .validatePeriodically(true)             // Use periodic validation instead
-    .validationInterval(Duration.ofMinutes(5))
-    .evictionInterval(Duration.ofMinutes(2))
-    .build();
-
-// Monitor and tune based on metrics
-ConnectionPoolMetrics metrics = client.getConnectionPoolMetrics("datacenter-id");
-System.out.printf("Avg acquisition time: %.2f ms%n", metrics.getAverageAcquisitionTime());
-System.out.printf("Efficiency ratio: %.3f%n", metrics.getEfficiencyRatio());
-
-// If efficiency is low, check for:
-// 1. Network issues to Redis
-// 2. Redis server overload
-// 3. Pool configuration mismatches with workload
-```
-
-#### Connection Validation Failures
-
-**Problem**: High number of validation failures in pool metrics
-
-**Solution**:
-
-```java
-// Check validation configuration
-ConnectionPoolConfig config = ConnectionPoolConfig.builder()
-    .validateOnAcquire(true)                // Validate before use
-    .validateOnReturn(false)                // Skip return validation for performance
-    .validatePeriodically(true)             // Background validation
-    .validationInterval(Duration.ofMinutes(2))  // Tune validation frequency
-    .evictionInterval(Duration.ofMinutes(2))
-    .build();
-
-// Monitor validation failures
-ConnectionPoolMetrics metrics = client.getConnectionPoolMetrics("datacenter-id");
-long validationFailures = metrics.getTotalValidationFailures();
-if (validationFailures > 0) {
-    logger.warn("Validation failures detected: {}", validationFailures);
-    // Check network connectivity and Redis server health
-}
-
-// Custom validation logic if needed
-DatacenterEndpoint endpoint = DatacenterEndpoint.builder()
-    .customValidator(connection -> {
+    // Validates connections before use
+    private boolean isConnectionValid(PooledConnectionImpl connection) {
         try {
-            return connection.ping().block(Duration.ofSeconds(1)) != null;
+            // Performs ping validation with configurable timeout
+            String result = connection.async().ping()
+                .get(validationTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            return "PONG".equals(result) && connection.isValid();
         } catch (Exception e) {
+            // Failed connections are automatically marked for removal
+            totalValidationFailures.incrementAndGet();
             return false;
         }
-    })
+    }
+    
+    // Background maintenance removes failed connections and creates new ones
+    public void maintainPool() {
+        // Remove expired/failed connections
+        allConnections.entrySet().removeIf(entry -> {
+            PooledConnectionImpl connection = entry.getKey();
+            boolean expired = isConnectionExpired(connection, currentTime);
+            if (expired) {
+                destroyConnection(connection);  // Clean up failed connection
+                logger.debug("Removed expired connection for datacenter: {}", datacenterId);
+            }
+            return expired;
+        });
+        
+        // Ensure minimum pool size (creates new connections automatically)
+        while (allConnections.size() < config.getMinPoolSize()) {
+            try {
+                PooledConnectionImpl connection = createConnection();
+                availableConnections.offer(connection);
+                logger.debug("Created new connection to maintain minimum pool size");
+            } catch (Exception e) {
+                logger.warn("Failed to create connection during maintenance: {}", e.getMessage());
+                break; // Stop trying if creation fails
+            }
+        }
+    }
+}
+```
+
+#### Pool Events During Reconnection
+
+```java
+// Monitor pool events to understand reconnection activity
+client.subscribeToPoolEvents((datacenterId, event, details) -> {
+    switch (event) {
+        case CONNECTION_CREATED:
+            logger.info("New connection created for datacenter: {} (likely due to reconnection)", datacenterId);
+            break;
+        case CONNECTION_DESTROYED:
+            logger.info("Failed connection destroyed for datacenter: {} (automatic cleanup)", datacenterId);
+            break;
+        case VALIDATION_FAILED:
+            logger.warn("Connection validation failed for datacenter: {} (will be replaced)", datacenterId);
+            break;
+        case ACQUISITION_TIMEOUT:
+            logger.warn("Connection acquisition timeout for datacenter: {} (may indicate issues)", datacenterId);
+            break;
+    }
+});
+```
+
+### 📊 Monitoring Reconnection Activity
+
+#### Connection Health Metrics
+
+```java
+// Monitor connection health and reconnection activity
+ConnectionPoolMetrics metrics = client.getConnectionPoolMetrics("datacenter-id");
+
+// Key metrics for understanding reconnection behavior
+long connectionsCreated = metrics.getTotalConnectionsCreated();
+long connectionsDestroyed = metrics.getTotalConnectionsDestroyed();
+long validationFailures = metrics.getTotalValidationFailures();
+double utilizationPercent = metrics.getUtilizationPercentage();
+
+// Log reconnection activity
+if (validationFailures > 0) {
+    logger.info("Connection failures detected: {} (auto-reconnecting)", validationFailures);
+}
+
+// Check for connection churn (may indicate network issues)
+long connectionChurn = connectionsCreated - connectionsDestroyed;
+if (connectionChurn > metrics.getMaxPoolSize() * 2) {
+    logger.warn("High connection churn detected: created={}, destroyed={}", 
+        connectionsCreated, connectionsDestroyed);
+}
+
+// Monitor pool health
+boolean isHealthy = client.isConnectionPoolHealthy("datacenter-id");
+if (!isHealthy) {
+    logger.warn("Connection pool unhealthy for datacenter: {}", "datacenter-id");
+}
+```
+
+#### Real-Time Health Monitoring
+
+```java
+// Subscribe to datacenter health changes
+client.subscribeToHealthChanges((datacenter, healthy) -> {
+    if (!healthy) {
+        logger.warn("Datacenter {} unhealthy - automatic failover activated. " +
+                   "Connections will be re-established automatically", datacenter.getId());
+    } else {
+        logger.info("Datacenter {} recovered - connections restored and traffic resumed", 
+                   datacenter.getId());
+    }
+});
+
+// Monitor circuit breaker state changes
+client.subscribeToCircuitBreakerEvents((datacenterId, state) -> {
+    switch (state) {
+        case OPEN:
+            logger.warn("Circuit breaker OPENED for datacenter: {} - stopping requests temporarily", datacenterId);
+            break;
+        case HALF_OPEN:
+            logger.info("Circuit breaker HALF_OPEN for datacenter: {} - testing reconnection", datacenterId);
+            break;
+        case CLOSED:
+            logger.info("Circuit breaker CLOSED for datacenter: {} - normal operation resumed", datacenterId);
+            break;
+    }
+});
+```
+
+### 🛡️ Application-Level Resilience
+
+#### Handling Temporary Connection Failures
+
+Your application code doesn't need special handling for reconnection - it happens transparently:
+
+```java
+public class ResilientRedisService {
+    private final MultiDatacenterRedisClient client;
+    
+    public Optional<String> getValue(String key) {
+        try {
+            // This operation will automatically:
+            // 1. Use a healthy connection from the pool
+            // 2. Validate the connection before use  
+            // 3. Automatically failover to another datacenter if needed
+            // 4. Queue the operation if all connections are temporarily down
+            return Optional.ofNullable(
+                client.sync().get(key, DatacenterPreference.LOCAL_PREFERRED));
+                
+        } catch (RedisConnectionException e) {
+            // This is rare - only happens if all datacenters are down
+            logger.warn("All datacenters temporarily unavailable for key: {}", key, e);
+            return Optional.empty();
+            
+        } catch (TimeoutException e) {
+            // Operation timed out - may retry automatically based on configuration
+            logger.warn("Operation timed out for key: " + key, e);
+            return Optional.empty();
+        }
+    }
+    
+    public void setValue(String key, String value) {
+        try {
+            // Write operations also benefit from automatic reconnection
+            client.sync().set(key, value, DatacenterPreference.LOCAL_PREFERRED);
+            logger.debug("Successfully set key: {}", key);
+            
+        } catch (Exception e) {
+            // With proper fallback configuration, this is very rare
+            logger.error("Failed to set key after all retry attempts: {}", key, e);
+            throw new ServiceException("Unable to store data", e);
+        }
+    }
+}
+```
+
+#### Proactive Connection Management
+
+```java
+// Warm up connections proactively
+CompletableFuture<Void> warmupFuture = client.warmUpConnections();
+warmupFuture.thenRun(() -> {
+    logger.info("All connection pools warmed up and ready");
+}).exceptionally(throwable -> {
+    logger.warn("Some connection pools failed to warm up: {}", throwable.getMessage());
+    return null;
+});
+
+// Periodic health checks (optional - automatic health monitoring is always active)
+ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+scheduler.scheduleAtFixedRate(() -> {
+    Map<String, Boolean> healthStatus = client.getConnectionPoolHealth();
+    healthStatus.forEach((datacenterId, healthy) -> {
+        if (!healthy) {
+            logger.warn("Datacenter {} connection pool unhealthy - automatic recovery in progress", 
+                       datacenterId);
+        }
+    });
+}, 0, 30, TimeUnit.SECONDS);
+```
+
+### 🎯 Best Practices
+
+#### 1. Configure Appropriate Timeouts
+
+```java
+// Balance responsiveness with stability
+DatacenterEndpoint endpoint = DatacenterEndpoint.builder()
+    .id("production-dc")
+    .host("redis.prod.example.com")
+    .port(6379)
+    .connectionTimeout(Duration.ofSeconds(10))              // Allow time for reconnection
+    .acquisitionTimeout(Duration.ofSeconds(5))              // Pool acquisition timeout
+    .idleTimeout(Duration.ofMinutes(10))                    // Keep connections alive
+    .maxConnectionAge(Duration.ofHours(1))                  // Periodic rotation
+    .validateOnAcquire(true)                                // Always validate
     .build();
 ```
 
-#### Performance Issues
-
-**Problem**: Slow operation response times
-
-**Solution**:
+#### 2. Use Circuit Breakers for Protection
 
 ```java
-// Use appropriate routing strategy
-config.withRoutingStrategy(RoutingStrategy.LATENCY_BASED);
-
-// Enable connection pooling
-DatacenterEndpoint endpoint = DatacenterEndpoint.builder()
-    .connectionPoolSize(50)  // Increase pool size
+// Protect against cascading failures during reconnection storms
+ResilienceConfig resilience = ResilienceConfig.builder()
+    .circuitBreakerConfig(
+        30.0f,                                              // 30% failure rate threshold
+        Duration.ofSeconds(60),                             // Open state duration
+        100,                                                // Sliding window size
+        10                                                  // Minimum calls before evaluation
+    )
+    .retryConfig(
+        3,                                                  // Max retry attempts
+        Duration.ofMillis(200)                              // 200ms between retries
+    )
     .build();
+```
 
-// Use async operations for better throughput
-List<CompletableFuture<String>> futures = keys.stream()
-    .map(key -> client.async().get(key))
-    .collect(Collectors.toList());
+#### 3. Monitor Connection Metrics
+
+```java
+// Set up monitoring dashboards
+public class ConnectionMonitoringService {
+    
+    public void logConnectionStatus() {
+        Map<String, ConnectionPoolMetrics> allMetrics = client.getAllConnectionPoolMetrics();
+        
+        allMetrics.forEach((datacenterId, metrics) -> {
+            logger.info("Datacenter: {} | Active: {}/{} | Created: {} | Destroyed: {} | Failures: {}", 
+                datacenterId,
+                metrics.getActiveConnections(),
+                metrics.getMaxPoolSize(),
+                metrics.getTotalConnectionsCreated(),
+                metrics.getTotalConnectionsDestroyed(),
+                metrics.getTotalValidationFailures()
+            );
+        });
+    }
+    
+    public void alertOnConnectionIssues() {
+        Map<String, ConnectionPoolMetrics> allMetrics = client.getAllConnectionPoolMetrics();
+        
+        allMetrics.forEach((datacenterId, metrics) -> {
+            double utilization = metrics.getUtilizationPercentage();
+            long failures = metrics.getTotalValidationFailures();
+            
+            if (utilization > 90) {
+                logger.warn("HIGH UTILIZATION: Datacenter {} pool at {}% capacity", 
+                           datacenterId, utilization);
+            }
+            
+            if (failures > 10) {
+                logger.warn("HIGH FAILURE RATE: Datacenter {} has {} connection failures", 
+                           datacenterId, failures);
+            }
+        });
+    }
+}
 ```
 
 ### Debug Logging
@@ -2393,22 +1936,24 @@ public class PoolDashboard {
             System.out.printf("  Avg Acquisition: %.2f ms%n", metrics.getAverageAcquisitionTime());
         }
     }
-}
-
-// Set up alerts
-client.subscribeToPoolEvents((datacenterId, event, details) -> {
-    switch (event) {
-        case POOL_EXHAUSTED:
-            alertingService.sendCriticalAlert("Pool exhausted: " + datacenterId);
-            break;
-        case HIGH_ACQUISITION_TIME:
-            alertingService.sendWarningAlert("Slow acquisitions: " + datacenterId);
-            break;
-        case VALIDATION_FAILURE_SPIKE:
-            alertingService.sendWarningAlert("Validation failures: " + datacenterId);
-            break;
+    
+    public void alertOnPoolIssues() {
+        // Monitor and alert on key metrics
+        client.subscribeToPoolEvents((datacenterId, event, details) -> {
+            switch (event) {
+                case POOL_EXHAUSTED:
+                    alertingService.sendCriticalAlert("Pool exhausted: " + datacenterId);
+                    break;
+                case HIGH_ACQUISITION_TIME:
+                    alertingService.sendWarningAlert("Slow acquisitions: " + datacenterId);
+                    break;
+                case VALIDATION_FAILURE_SPIKE:
+                    alertingService.sendWarningAlert("Validation failures: " + datacenterId);
+                    break;
+            }
+        });
     }
-});
+}
 ```
 
 **Q: What's the best routing strategy for my use case?**
@@ -2446,10 +1991,10 @@ A: Connection pools work seamlessly with all resilience patterns:
 // Circuit breakers protect pools from cascading failures
 ResilienceConfig config = ResilienceConfig.builder()
     .circuitBreakerConfig(
-        30.0f,                              // 30% failure rate threshold
-        Duration.ofSeconds(60),             // Open state duration
-        100,                                // Sliding window size
-        10                                  // Minimum calls before evaluation
+        30.0f,                                // 30% failure rate threshold
+        Duration.ofSeconds(60),               // Open state duration
+        100,                                  // Sliding window size
+        10                                    // Minimum calls before evaluation
     )
     .retryConfig(
         3,                                    // Max retry attempts
@@ -2548,6 +2093,7 @@ Each example is fully documented with inline comments explaining the patterns, b
 ### ✅ **Fully Implemented Features**
 - Multi-datacenter configuration and routing
 - Synchronous, asynchronous, and reactive operations  
+- **Automatic reconnection** with transparent multi-layer resilience (Lettuce client, connection pools, datacenter routing)
 - Comprehensive resilience patterns (Circuit Breaker, Retry, Rate Limiter, Bulkhead, Time Limiter)
 - **Production-ready fallback strategies** (NEW - 8 different strategies including NEXT_AVAILABLE, TRY_ALL, BEST_EFFORT, etc.)
 - Connection pooling with monitoring and metrics
@@ -2568,3 +2114,4 @@ Each example is fully documented with inline comments explaining the patterns, b
 - Performance optimization recommendations
 
 The library is production-ready for the implemented features. All examples and documentation reflect only the currently available functionality.
+```
