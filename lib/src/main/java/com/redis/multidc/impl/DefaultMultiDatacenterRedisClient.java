@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * Default implementation of the multi-datacenter Redis client.
@@ -306,6 +307,29 @@ public class DefaultMultiDatacenterRedisClient implements MultiDatacenterRedisCl
                 notification.getDetails()
             )
         );
+    }
+
+    @Override
+    public CompletableFuture<Void> warmUpConnections() {
+        checkNotClosed();
+        
+        // Get all connection pools and warm them up in parallel
+        List<CompletableFuture<Void>> warmupFutures = poolManager.getAllPools()
+            .values()
+            .stream()
+            .map(ConnectionPool::warmUp)
+            .collect(Collectors.toList());
+        
+        // Wait for all pools to complete warmup
+        return CompletableFuture.allOf(warmupFutures.toArray(new CompletableFuture[0]))
+            .whenComplete((result, throwable) -> {
+                if (throwable == null) {
+                    logger.info("Successfully warmed up all connection pools across {} datacenters", 
+                               configuration.getDatacenters().size());
+                } else {
+                    logger.warn("Some connection pools failed to warm up completely", throwable);
+                }
+            });
     }
 
     private void checkNotClosed() {

@@ -111,6 +111,15 @@ public class ConnectionPoolManager implements AutoCloseable {
     }
     
     /**
+     * Gets all connection pools.
+     * 
+     * @return an unmodifiable map of datacenter ID to connection pool
+     */
+    public Map<String, ConnectionPool<String, String>> getAllPools() {
+        return java.util.Collections.unmodifiableMap(pools);
+    }
+    
+    /**
      * Forces maintenance on all pools.
      * This method triggers immediate maintenance tasks like connection validation
      * and cleanup across all pools.

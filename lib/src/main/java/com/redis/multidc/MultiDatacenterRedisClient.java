@@ -141,6 +141,13 @@ public interface MultiDatacenterRedisClient extends AutoCloseable {
     Disposable subscribeToPoolEvents(PoolEventListener listener);
     
     /**
+     * Warm up all connection pools by pre-creating minimum connections.
+     * This is useful during application startup to ensure connections are ready.
+     * @return CompletableFuture that completes when all pools are warmed up
+     */
+    CompletableFuture<Void> warmUpConnections();
+    
+    /**
      * Close the client and release all resources.
      */
     @Override
