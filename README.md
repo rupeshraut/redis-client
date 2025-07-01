@@ -379,8 +379,7 @@ DatacenterConfiguration config = DatacenterConfiguration.builder()
     .requestTimeout(Duration.ofSeconds(10))
     .maxRetries(3)
     .retryDelay(Duration.ofMillis(100))
-    .enableCircuitBreaker(true)
-    .circuitBreakerConfig(CircuitBreakerConfig.defaultConfig())
+    .resilienceConfig(ResilienceConfig.defaultConfig()) // Modern approach
     .build();
 ```
 
@@ -1130,11 +1129,17 @@ DatacenterConfiguration highPerformanceConfig = DatacenterConfiguration.builder(
     .healthCheckInterval(Duration.ofSeconds(15))       // Frequent health checks
     .connectionTimeout(Duration.ofSeconds(2))          // Fast timeouts
     .requestTimeout(Duration.ofSeconds(5))
-    .enableCircuitBreaker(true)
-    .circuitBreakerConfig(CircuitBreakerConfig.builder()
-        .failureThreshold(5)                           // Open circuit after 5 failures
-        .recoveryTimeout(Duration.ofSeconds(30))       // Try recovery after 30s
-        .halfOpenMaxCalls(3)                          // Max calls in half-open state
+    .resilienceConfig(ResilienceConfig.builder()
+        .circuitBreaker(CircuitBreakerConfig.custom()
+            .failureRateThreshold(50.0f)              // 50% failure rate threshold
+            .waitDurationInOpenState(Duration.ofSeconds(30)) // Recovery timeout
+            .slidingWindowSize(10)                     // Sliding window for evaluation
+            .minimumNumberOfCalls(5)                   // Min calls before evaluation
+            .build())
+        .retry(RetryConfig.custom()
+            .maxAttempts(3)
+            .waitDuration(Duration.ofMillis(100))
+            .build())
         .build())
     .build();
 
@@ -1504,30 +1509,30 @@ DatacenterConfiguration config = DatacenterConfiguration.builder()
     // Global configuration
     .localDatacenter("us-east-1")
     .routingStrategy(RoutingStrategy.LATENCY_BASED)
-    .fallbackStrategy(FallbackStrategy.NEXT_AVAILABLE)
     
     // Timeouts and retries
     .connectionTimeout(Duration.ofSeconds(5))
     .requestTimeout(Duration.ofSeconds(10))
     .maxRetries(3)
     .retryDelay(Duration.ofMillis(100))
-    .retryBackoffMultiplier(2.0)
     
     // Health monitoring
     .healthCheckInterval(Duration.ofSeconds(30))
-    .healthCheckTimeout(Duration.ofSeconds(5))
-    .enableCircuitBreaker(true)
-    .circuitBreakerConfig(CircuitBreakerConfig.builder()
-        .failureRateThreshold(5)
-        .waitDurationInOpenState(Duration.ofSeconds(30))
-        .slidingWindowSize(10)
-        .minimumNumberOfCalls(5)
-        .build())
     
-    // Security
-    .enableSslHostnameVerification(true)
-    .sslContext(customSslContext)
-    .authenticationMode(AuthenticationMode.PASSWORD)
+    // Modern resilience patterns (recommended)
+    .resilienceConfig(ResilienceConfig.builder()
+        .circuitBreaker(CircuitBreakerConfig.custom()
+            .failureRateThreshold(50.0f)
+            .waitDurationInOpenState(Duration.ofSeconds(30))
+            .slidingWindowSize(10)
+            .minimumNumberOfCalls(5)
+            .build())
+        .retry(RetryConfig.custom()
+            .maxAttempts(3)
+            .waitDuration(Duration.ofMillis(100))
+            .build())
+        .enableBasicPatterns()
+        .build())
     
     // Observability
     .enableDetailedMetrics(true)
@@ -1558,7 +1563,7 @@ DatacenterConfiguration devConfig = DatacenterConfiguration.builder()
     .localDatacenter("local")
     .routingStrategy(RoutingStrategy.LOCAL_ONLY)
     .requestTimeout(Duration.ofSeconds(30))
-    .enableCircuitBreaker(false)
+    .resilienceConfig(ResilienceConfig.relaxedConfig()) // Relaxed for dev/test
     .build();
 ```
 
@@ -1571,10 +1576,8 @@ DatacenterConfiguration prodConfig = DatacenterConfiguration.builder()
     .connectionTimeout(Duration.ofSeconds(2))
     .requestTimeout(Duration.ofSeconds(5))
     .maxRetries(3)
-    .enableCircuitBreaker(true)
+    .resilienceConfig(ResilienceConfig.highThroughputConfig()) // Production-optimized
     .healthCheckInterval(Duration.ofSeconds(15))
-    .enableDetailedMetrics(true)
-    .enableDistributedTracing(true)
     .build();
 ```
 
@@ -2126,6 +2129,8 @@ Timer requestDuration = Timer.builder("redis.duration")
 
 A: The library uses circuit breakers and health monitoring to detect failures automatically. When a datacenter becomes unhealthy, the routing logic automatically fails over to available datacenters based on your configured strategy.
 
+
+
 **Q: Can I use this library with Redis Cluster?**
 
 A: Yes, the library works with Redis Cluster. Configure each cluster endpoint as a separate datacenter:
@@ -2262,31 +2267,44 @@ A: Connection pools work seamlessly with all resilience patterns:
 // Circuit breakers protect pools from cascading failures
 ResilienceConfig config = ResilienceConfig.builder()
     .circuitBreakerConfig(
-        30.0f,                              // Failure threshold
-        Duration.ofSeconds(60),             // Recovery time
-        100,                                // Sliding window
-        10                                  // Minimum calls
+        30.0f,                              // 30% failure rate threshold
+        Duration.ofSeconds(60),             // Open state duration
+        100,                                // Sliding window size
+        10                                  // Minimum calls before evaluation
+    )
+    .retryConfig(
+        3,                                    // Max retry attempts
+        Duration.ofMillis(200)                // Delay between retries
+    )
+    .rateLimiterConfig(
+        1000,                                   // Permits per period
+        Duration.ofSeconds(1),                  // Period duration
+        Duration.ofMillis(100)                  // Timeout for permit acquisition
+    )
+    .bulkheadConfig(
+        50,                                     // Max concurrent calls
+        Duration.ofMillis(100)                  // Max wait duration
+    )
+    .timeLimiterConfig(
+        Duration.ofSeconds(10),               // Operation timeout
+        true                                  // Cancel running futures on timeout
     )
     .build();
 
-// When circuit breaker opens:
-// 1. Pool stops creating new connections to failed datacenter
-// 2. Existing connections are drained gracefully
-// 3. Traffic routes to healthy datacenters
-// 4. Pool recovers when circuit breaker closes
-
-// Rate limiters control connection acquisition
-.rateLimiterConfig(
-    1000,                                   // Max operations per second
-    Duration.ofSeconds(1),                  // Period
-    Duration.ofMillis(100)                  // Timeout
-)
-
-// Bulkheads isolate connection usage
-.bulkheadConfig(
-    50,                                     // Max concurrent operations
-    Duration.ofMillis(100)                  // Max wait time
-)
+DatacenterConfiguration config = DatacenterConfiguration.builder()
+    .datacenters(List.of(
+        DatacenterEndpoint.builder()
+            .id("resilient-dc")
+            .host("redis.example.com")
+            .port(6379)
+            .poolConfig(ConnectionPoolConfig.builder()
+                .highThroughput()
+                .maxPoolSize(100)
+                .build())
+            .resilienceConfig(resilienceConfig)
+            .build()
+    ))
+    .build();
 ```
 
 **Q: What happens when a datacenter fails?**
@@ -2345,3 +2363,29 @@ Enterprise-ready configuration with SSL/TLS, authentication, monitoring, resilie
 Advanced data locality patterns, tombstone key management, cache invalidation strategies, and distributed cache coherence.
 
 Each example is fully documented with inline comments explaining the patterns, best practices, and production considerations.
+
+## Implementation Status
+
+### ✅ **Fully Implemented Features**
+- Multi-datacenter configuration and routing
+- Synchronous, asynchronous, and reactive operations  
+- Comprehensive resilience patterns (Circuit Breaker, Retry, Rate Limiter, Bulkhead, Time Limiter)
+- Connection pooling with monitoring and metrics
+- Health monitoring and event subscription
+- Data locality management and tombstone key management
+- SSL/TLS support and authentication
+- Comprehensive observability with Micrometer metrics
+
+### 🚧 **Features in Development**
+- Advanced fallback strategies (currently uses routing strategy for failover)
+- Custom authentication modes beyond password/no-auth
+- Advanced SSL configuration options
+- Distributed tracing integration
+
+### 📋 **Roadmap**
+- Automatic data migration based on access patterns
+- Advanced conflict resolution for CRDB scenarios
+- Enhanced monitoring dashboards and alerting
+- Performance optimization recommendations
+
+The library is production-ready for the implemented features. All examples and documentation reflect only the currently available functionality.
