@@ -44,7 +44,45 @@ dependencies {
     implementation 'io.lettuce:lettuce-core:6.3.2.RELEASE'
     implementation 'io.projectreactor:reactor-core:3.6.0'
     implementation 'io.micrometer:micrometer-core:1.12.0'
+    
+    // Resilience4j for fault tolerance patterns
+    implementation 'io.github.resilience4j:resilience4j-all:2.1.0'
+    
+    // Optional: Spring Boot integration
+    implementation 'org.springframework.boot:spring-boot-starter:3.2.0'
 }
+```
+
+For Maven projects:
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>com.redis.multidc</groupId>
+        <artifactId>redis-multidc-client</artifactId>
+        <version>1.0.0</version>
+    </dependency>
+    <dependency>
+        <groupId>io.lettuce</groupId>
+        <artifactId>lettuce-core</artifactId>
+        <version>6.3.2.RELEASE</version>
+    </dependency>
+    <dependency>
+        <groupId>io.projectreactor</groupId>
+        <artifactId>reactor-core</artifactId>
+        <version>3.6.0</version>
+    </dependency>
+    <dependency>
+        <groupId>io.micrometer</groupId>
+        <artifactId>micrometer-core</artifactId>
+        <version>1.12.0</version>
+    </dependency>
+    <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-all</artifactId>
+        <version>2.1.0</version>
+    </dependency>
+</dependencies>
 ```
 
 ### Basic Usage
@@ -54,8 +92,14 @@ import com.redis.multidc.MultiDatacenterRedisClient;
 import com.redis.multidc.MultiDatacenterRedisClientBuilder;
 import com.redis.multidc.config.DatacenterConfiguration;
 import com.redis.multidc.config.DatacenterEndpoint;
+import com.redis.multidc.config.ResilienceConfig;
 import com.redis.multidc.config.RoutingStrategy;
 import com.redis.multidc.model.DatacenterPreference;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import reactor.core.publisher.Mono;
 
 // Configure multiple datacenters
 DatacenterConfiguration config = DatacenterConfiguration.builder()
@@ -78,7 +122,7 @@ DatacenterConfiguration config = DatacenterConfiguration.builder()
     .localDatacenter("us-east-1")
     .routingStrategy(RoutingStrategy.LATENCY_BASED)
     .healthCheckInterval(Duration.ofSeconds(30))
-    .enableCircuitBreaker(true)
+    .resilienceConfig(ResilienceConfig.defaultConfig()) // Modern resilience configuration
     .build();
 
 // Create client
@@ -94,6 +138,52 @@ try (MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.creat
     // Reactive operations
     Mono<String> mono = client.reactive().get("user:123");
 }
+```
+
+### Advanced Resilience Configuration
+
+For production environments, you can configure comprehensive resilience patterns:
+
+```java
+import com.redis.multidc.config.ResilienceConfig;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.github.resilience4j.retry.RetryConfig;
+
+// Production-ready resilience configuration
+ResilienceConfig resilienceConfig = ResilienceConfig.builder()
+    .circuitBreaker(CircuitBreakerConfig.custom()
+        .failureRateThreshold(50.0f)                    // 50% failure rate threshold
+        .waitDurationInOpenState(Duration.ofSeconds(30)) // Wait 30s in open state
+        .slidingWindowSize(10)                          // Sliding window size
+        .minimumNumberOfCalls(5)                        // Minimum calls to evaluate
+        .build())
+    .retry(RetryConfig.custom()
+        .maxAttempts(3)                                 // Max 3 retry attempts
+        .waitDuration(Duration.ofMillis(500))           // 500ms between retries
+        .build())
+    .enableBasicPatterns()                              // Enable circuit breaker + retry
+    .build();
+
+// Use in configuration
+DatacenterConfiguration config = DatacenterConfiguration.builder()
+    .datacenters(/* ... */)
+    .resilienceConfig(resilienceConfig)                 // Apply resilience config
+    .build();
+```
+
+### Quick Configuration Presets
+
+For common scenarios, use predefined configurations:
+
+```java
+// Development/Testing - relaxed thresholds
+ResilienceConfig relaxed = ResilienceConfig.relaxedConfig();
+
+// High-throughput production - optimized for performance
+ResilienceConfig highThroughput = ResilienceConfig.highThroughputConfig();
+
+// Default production - balanced reliability and performance
+ResilienceConfig defaultConfig = ResilienceConfig.defaultConfig();
 ```
 
 ## Configuration
@@ -1044,6 +1134,7 @@ DatacenterConfiguration highPerformanceConfig = DatacenterConfiguration.builder(
     .circuitBreakerConfig(CircuitBreakerConfig.builder()
         .failureThreshold(5)                           // Open circuit after 5 failures
         .recoveryTimeout(Duration.ofSeconds(30))       // Try recovery after 30s
+        .halfOpenMaxCalls(3)                          // Max calls in half-open state
         .build())
     .build();
 
@@ -1427,9 +1518,10 @@ DatacenterConfiguration config = DatacenterConfiguration.builder()
     .healthCheckTimeout(Duration.ofSeconds(5))
     .enableCircuitBreaker(true)
     .circuitBreakerConfig(CircuitBreakerConfig.builder()
-        .failureThreshold(5)
-        .recoveryTimeout(Duration.ofSeconds(30))
-        .halfOpenMaxCalls(3)
+        .failureRateThreshold(5)
+        .waitDurationInOpenState(Duration.ofSeconds(30))
+        .slidingWindowSize(10)
+        .minimumNumberOfCalls(5)
         .build())
     
     // Security
@@ -1439,7 +1531,7 @@ DatacenterConfiguration config = DatacenterConfiguration.builder()
     
     // Observability
     .enableDetailedMetrics(true)
-    .metricsRegistry(prometheusRegistry)
+    .metricsRegistry(meterRegistry)
     .enableDistributedTracing(true)
     
     // Advanced features
@@ -1487,6 +1579,27 @@ DatacenterConfiguration prodConfig = DatacenterConfiguration.builder()
 ```
 
 ## Examples and Demonstrations
+
+### Getting Started with Examples
+
+To quickly explore the library's capabilities, check out our comprehensive examples:
+
+#### 🚀 **Start Here**: [Simple Usage Example](lib/src/main/java/com/redis/multidc/example/SimpleUsageExample.java)
+Basic working example demonstrating core functionality - perfect for getting started.
+
+#### 🏭 **Production Ready**: [Production Usage Example](lib/src/main/java/com/redis/multidc/example/ProductionUsageExample.java)
+Enterprise configuration with SSL/TLS, authentication, monitoring, and best practices.
+
+#### ⚡ **Performance**: [Reactive Streaming Example](lib/src/main/java/com/redis/multidc/example/ReactiveStreamingExample.java)
+High-performance reactive programming patterns with backpressure handling and error recovery.
+
+#### 📊 **Monitoring**: [Health Monitoring Example](lib/src/main/java/com/redis/multidc/example/HealthMonitoringExample.java)
+Real-time health monitoring, event subscription, and operational observability.
+
+#### 💾 **Advanced Features**: [Data Locality & Tombstone Example](lib/src/main/java/com/redis/multidc/example/DataLocalityManagerExample.java)
+Advanced data management patterns including locality optimization and tombstone key management.
+
+Each example includes detailed documentation and can be run independently to demonstrate specific functionality.
 
 ### Production Connection Pool Demo
 
@@ -1860,9 +1973,9 @@ CircuitBreakerConfig cbConfig = CircuitBreakerConfig.builder()
     .build();
 
 // Monitor circuit breaker state
-client.subscribeToHealthChanges((dc, healthy) -> {
+client.subscribeToHealthChanges((datacenter, healthy) -> {
     if (!healthy) {
-        logger.warn("Circuit breaker opened for datacenter: {}", dc.getId());
+        logger.warn("Circuit breaker opened for datacenter: {}", datacenter.getId());
     }
 });
 ```
@@ -1934,6 +2047,7 @@ ConnectionPoolConfig config = ConnectionPoolConfig.builder()
     .validateOnReturn(false)                // Skip return validation for performance
     .validatePeriodically(true)             // Background validation
     .validationInterval(Duration.ofMinutes(2))  // Tune validation frequency
+    .evictionInterval(Duration.ofMinutes(2))
     .build();
 
 // Monitor validation failures
@@ -1977,19 +2091,18 @@ List<CompletableFuture<String>> futures = keys.stream()
     .collect(Collectors.toList());
 ```
 
-### Debugging
+### Debug Logging
 
-#### Enable Debug Logging
+Enable debug logging for detailed internal state and request/response logging.
 
-```java
-// logback.xml
+```xml
 <configuration>
     <logger name="com.redis.multidc" level="DEBUG"/>
     <logger name="io.lettuce.core" level="DEBUG"/>
 </configuration>
 ```
 
-#### Metrics Dashboard
+### Metrics Dashboard
 
 ```java
 // Export metrics to monitoring system
@@ -2019,7 +2132,7 @@ A: Yes, the library works with Redis Cluster. Configure each cluster endpoint as
 
 ```java
 DatacenterEndpoint clusterEndpoint = DatacenterEndpoint.builder()
-    .id("cluster-dc-1")
+       .id("cluster-dc-1")
     .host("redis-cluster.example.com")
     .port(6379)
     .clusterMode(true)
@@ -2223,15 +2336,7 @@ Comprehensive reactive programming patterns including backpressure handling, err
 
 Real-time health monitoring, event subscription, datacenter failover detection, and operational observability patterns.
 
-### 🚀 [Advanced Batch Operations](lib/src/main/java/com/redis/multidc/example/AdvancedBatchOperationsExample.java)
-
-High-performance batch processing, cross-datacenter operations, consistency patterns, and error handling strategies.
-
-### 🔒 [Distributed Locking](lib/src/main/java/com/redis/multidc/example/DistributedLockExample.java)
-
-Production-grade distributed locking with automatic renewal, contention handling, deadlock prevention, and cross-datacenter consistency.
-
-### 🏭 [Production Usage Patterns](lib/src/main/java/com/redis/multidc/example/ProductionUsageExample.java)
+### 🚀 [Production Usage Patterns](lib/src/main/java/com/redis/multidc/example/ProductionUsageExample.java)
 
 Enterprise-ready configuration with SSL/TLS, authentication, monitoring, resilience patterns, and operational best practices.
 
