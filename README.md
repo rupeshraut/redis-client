@@ -1875,7 +1875,7 @@ client.subscribeToHealthChanges((dc, healthy) -> {
 
 ```java
 // Ensure proper client cleanup
-try (MultiDatacenterRedisClient client = createClient()) {
+try (MultiDatacenterRedisClient client = MultiDatacenterRedisClientBuilder.create(config)) {
     // Use client
 } // Automatic cleanup
 
@@ -1907,6 +1907,7 @@ ConnectionPoolConfig optimizedConfig = ConnectionPoolConfig.builder()
     .validateOnAcquire(false)               // Disable if not needed
     .validatePeriodically(true)             // Use periodic validation instead
     .validationInterval(Duration.ofMinutes(5))
+    .evictionInterval(Duration.ofMinutes(2))
     .build();
 
 // Monitor and tune based on metrics
@@ -2054,7 +2055,7 @@ ConnectionPoolConfig highConcurrency = ConnectionPoolConfig.builder()
 // For low-latency applications (< 10ms response time requirements)
 ConnectionPoolConfig lowLatency = ConnectionPoolConfig.builder()
     .lowLatency()
-    .maxPoolSize(30-50)
+    .maxPoolSize(30)
     .minPoolSize(15)
     .acquisitionTimeout(Duration.ofMillis(500))
     .build();
@@ -2171,7 +2172,7 @@ ResilienceConfig config = ResilienceConfig.builder()
 // Bulkheads isolate connection usage
 .bulkheadConfig(
     50,                                     // Max concurrent operations
-    Duration.ofMillis(100)                  // Wait time
+    Duration.ofMillis(100)                  // Max wait time
 )
 ```
 
@@ -2206,110 +2207,36 @@ client.drainConnectionPool("maintenance-datacenter");  // Graceful drain
 client.restoreConnectionPool("maintenance-datacenter"); // Restore when ready
 ```
 
-### Security Questions
+## Advanced Examples
 
-**Q: How do I configure SSL/TLS properly?**
+This library includes comprehensive examples demonstrating advanced usage patterns:
 
-A: Use proper SSL configuration:
+### 🔗 [Connection Pool Management](lib/src/main/java/com/redis/multidc/example/ConnectionPoolManagementExample.java)
 
-```java
-DatacenterEndpoint secureEndpoint = DatacenterEndpoint.builder()
-    .ssl(true)
-    .sslTruststore("/path/to/truststore.jks")
-    .sslTruststorePassword("password")
-    .sslProtocol("TLSv1.3")
-    .enableSslHostnameVerification(true)
-    .build();
-```
+Advanced connection pool configuration, monitoring, health checks, and optimization strategies for production deployments.
 
-**Q: How do I rotate passwords without downtime?**
+### ⚡ [Reactive Streaming Operations](lib/src/main/java/com/redis/multidc/example/ReactiveStreamingExample.java)
 
-A: The library supports connection pool refresh:
+Comprehensive reactive programming patterns including backpressure handling, error recovery, and streaming data processing with Project Reactor.
 
-```java
-// Update configuration with new credentials
-DatacenterConfiguration newConfig = existingConfig.toBuilder()
-    .updateDatacenter("dc-id", endpoint -> endpoint.password("new-password"))
-    .build();
+### 📊 [Health Monitoring & Events](lib/src/main/java/com/redis/multidc/example/HealthMonitoringExample.java)
 
-// Refresh connections
-client.refreshConnections(newConfig);
-```
+Real-time health monitoring, event subscription, datacenter failover detection, and operational observability patterns.
 
-### Operational Questions
+### 🚀 [Advanced Batch Operations](lib/src/main/java/com/redis/multidc/example/AdvancedBatchOperationsExample.java)
 
-**Q: How do I monitor the library in production?**
+High-performance batch processing, cross-datacenter operations, consistency patterns, and error handling strategies.
 
-A: Use the built-in metrics integration:
+### 🔒 [Distributed Locking](lib/src/main/java/com/redis/multidc/example/DistributedLockExample.java)
 
-```java
-// Key metrics to alert on
-- redis.multidc.health.status (datacenter health)
-- redis.multidc.circuit.state (circuit breaker state)  
-- redis.multidc.requests.duration (operation latency)
-- redis.multidc.connections.active (connection usage)
-```
+Production-grade distributed locking with automatic renewal, contention handling, deadlock prevention, and cross-datacenter consistency.
 
-**Q: How do I perform rolling updates?**
+### 🏭 [Production Usage Patterns](lib/src/main/java/com/redis/multidc/example/ProductionUsageExample.java)
 
-A: Use datacenter weights and health monitoring:
+Enterprise-ready configuration with SSL/TLS, authentication, monitoring, resilience patterns, and operational best practices.
 
-```java
-// 1. Reduce weight for datacenter being updated
-client.updateDatacenterWeight("dc-being-updated", 0.0);
+### 💾 [Data Locality & Tombstone Management](lib/src/main/java/com/redis/multidc/example/DataLocalityManagerExample.java)
 
-// 2. Wait for traffic to drain
-Thread.sleep(30000);
+Advanced data locality patterns, tombstone key management, cache invalidation strategies, and distributed cache coherence.
 
-// 3. Perform update
-
-// 4. Restore weight
-client.updateDatacenterWeight("dc-being-updated", 1.0);
-```
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on:
-
-- Code style and conventions
-- Testing requirements
-- Pull request process
-- Development environment setup
-
-### Development Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/your-org/redis-multidc-client.git
-
-# Build the project
-./gradlew build
-
-# Run tests
-./gradlew test
-
-# Run integration tests (requires Redis)
-./gradlew integrationTest
-```
-
-## License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For questions and support:
-
-- **GitHub Issues**: Open an issue for bugs and feature requests
-- **Documentation**: Check the [Wiki](../../wiki) for additional documentation
-- **Examples**: Review example code in the [`examples/`](examples/) directory
-- **Community**: Join our [Discord](https://discord.gg/redis-multidc) for real-time support
-
-### Enterprise Support
-
-Commercial support and consulting services are available. Contact us at [enterprise@redis-multidc.com](mailto:enterprise@redis-multidc.com) for:
-
-- Custom feature development
-- Performance optimization consulting
-- Production deployment assistance
-- Training and workshops
+Each example is fully documented with inline comments explaining the patterns, best practices, and production considerations.

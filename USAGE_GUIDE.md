@@ -10,6 +10,7 @@ This guide shows how to effectively use the DataLocalityManager and TombstoneKey
 4. [Integration Patterns](#integration-patterns)
 5. [Best Practices](#best-practices)
 6. [Configuration Examples](#configuration-examples)
+7. [Advanced Examples Reference](#advanced-examples-reference)
 
 ## Overview
 
@@ -513,5 +514,53 @@ TombstoneKeyManager.TombstoneConfig devTombstoneConfig = TombstoneKeyManager.Tom
     .lockTimeout(Duration.ofMinutes(1))               // Quick timeout
     .build();
 ```
+
+## Advanced Examples Reference
+
+For comprehensive usage patterns and production-ready implementations, refer to our advanced examples:
+
+### 🔗 [Connection Pool Management Example](lib/src/main/java/com/redis/multidc/example/ConnectionPoolManagementExample.java)
+- Advanced pool configuration and tuning
+- Real-time monitoring and alerting
+- Pool health management and optimization
+- Production-grade connection lifecycle management
+
+### ⚡ [Reactive Streaming Example](lib/src/main/java/com/redis/multidc/example/ReactiveStreamingExample.java)
+- Reactive programming patterns with Project Reactor
+- Backpressure handling and flow control
+- Error recovery and retry strategies
+- Streaming data processing pipelines
+
+### 📊 [Health Monitoring Example](lib/src/main/java/com/redis/multidc/example/HealthMonitoringExample.java)
+- Real-time health event subscription
+- Datacenter failover detection
+- Pool metrics monitoring
+- Operational observability patterns
+
+### 🚀 [Advanced Batch Operations Example](lib/src/main/java/com/redis/multidc/example/AdvancedBatchOperationsExample.java)
+- High-performance batch processing
+- Cross-datacenter consistency patterns
+- Error handling and recovery strategies
+- Bulk operation optimization
+
+### 🔒 [Distributed Lock Example](lib/src/main/java/com/redis/multidc/example/DistributedLockExample.java)
+- Production-grade distributed locking
+- Automatic lock renewal and timeouts
+- Contention handling and deadlock prevention
+- Cross-datacenter lock consistency
+
+### 🏭 [Production Usage Example](lib/src/main/java/com/redis/multidc/example/ProductionUsageExample.java)
+- Enterprise-ready configuration
+- SSL/TLS security configuration
+- Authentication and authorization
+- Monitoring and resilience patterns
+
+### 💾 [Data Locality & Tombstone Example](lib/src/main/java/com/redis/multidc/example/DataLocalityManagerExample.java)
+- Advanced data locality optimization
+- Tombstone key management patterns
+- Cache invalidation strategies
+- Distributed cache coherence
+
+Each example includes detailed documentation, best practices, and production considerations.
 
 This completes the comprehensive usage guide for DataLocalityManager and TombstoneKeyManager. Both managers provide powerful capabilities for optimizing Redis operations across multiple datacenters while maintaining data consistency and providing advanced lifecycle management.
